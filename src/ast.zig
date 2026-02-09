@@ -20,6 +20,7 @@ pub const Node = union(enum) {
     expr: Expr,
     if_stmt: IfStatement,
     for_stmt: ForStatement,
+    switch_stmt: SwitchStatement,
     component_call: ComponentCall,
 };
 
@@ -54,6 +55,7 @@ pub const Expr = struct {
         zig_code: []const u8,
         if_expr: IfExpr,
         for_expr: ForExpr,
+        switch_expr: SwitchExpr,
         element: *Element,
     };
 };
@@ -97,6 +99,32 @@ pub const ForStatement = struct {
     iterable: []const u8,
     captures: []const u8,
     body: []const Node,
+};
+
+/// Block-level: switch (expr) { .case => { ... }, ... }
+pub const SwitchStatement = struct {
+    value: []const u8,
+    cases: []const SwitchCase,
+};
+
+/// A single switch case
+pub const SwitchCase = struct {
+    pattern: []const u8, // ".active", "else", ".foo, .bar", etc.
+    capture: ?[]const u8, // |val| capture if present
+    body: []const Node,
+};
+
+/// Inline switch expression
+pub const SwitchExpr = struct {
+    value: []const u8,
+    cases: []const SwitchBranch,
+};
+
+/// A single inline switch branch
+pub const SwitchBranch = struct {
+    pattern: []const u8,
+    capture: ?[]const u8,
+    body: Branch,
 };
 
 pub const Location = struct {

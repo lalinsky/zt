@@ -71,6 +71,18 @@ for (items) |item| {
 for (items, 0..) |item, idx| {
     <li>{idx}: {item.name}</li>
 }
+
+switch (status) {
+    .active => {
+        <span class="green">Active</span>
+    },
+    .pending => |msg| {
+        <span class="yellow">{msg}</span>
+    },
+    else => {
+        <span>Unknown</span>
+    },
+}
 ```
 
 Inline:
@@ -79,6 +91,7 @@ Inline:
 {if (user.admin) <span>Admin</span> else <span>User</span>}
 {if (user.nickname) |nick| nick else user.name}
 {for (tags) |tag| <span class="tag">{tag}</span>}
+{switch (role) .admin => <span>Admin</span>, .user => <span>User</span>, else => <span>Guest</span>}
 ```
 
 ### Component Calls

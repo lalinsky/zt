@@ -57,6 +57,7 @@ pub const Generator = struct {
             .expr => |expr| try self.generateExpr(expr),
             .if_stmt => |stmt| try self.generateIfStmt(stmt),
             .for_stmt => |stmt| try self.generateForStmt(stmt),
+            .switch_stmt => |stmt| try self.generateSwitchStmt(stmt),
             .component_call => |call| try self.generateComponentCall(call),
         }
     }
@@ -175,6 +176,7 @@ pub const Generator = struct {
             },
             .if_expr => |if_expr| try self.generateIfExpr(if_expr, expr.raw),
             .for_expr => |for_expr| try self.generateForExpr(for_expr, expr.raw),
+            .switch_expr => |switch_expr| try self.generateSwitchExpr(switch_expr, expr.raw),
             .element => |elem| try self.generateElement(elem.*),
         }
     }
@@ -283,6 +285,70 @@ pub const Generator = struct {
         self.indent += 1;
         for (stmt.body) |node| {
             try self.generateNode(node);
+        }
+        self.indent -= 1;
+
+        try self.writeIndent();
+        try self.output.writeAll("}\n");
+    }
+
+    fn generateSwitchStmt(self: *Generator, stmt: ast.SwitchStatement) std.Io.Writer.Error!void {
+        try self.writeIndent();
+        try self.output.writeAll("switch (");
+        try self.output.writeAll(stmt.value);
+        try self.output.writeAll(") {\n");
+
+        self.indent += 1;
+        for (stmt.cases) |case| {
+            try self.writeIndent();
+            try self.output.writeAll(case.pattern);
+            try self.output.writeAll(" => ");
+            if (case.capture) |cap| {
+                try self.output.writeAll("|");
+                try self.output.writeAll(cap);
+                try self.output.writeAll("| ");
+            }
+            try self.output.writeAll("{\n");
+
+            self.indent += 1;
+            for (case.body) |node| {
+                try self.generateNode(node);
+            }
+            self.indent -= 1;
+
+            try self.writeIndent();
+            try self.output.writeAll("},\n");
+        }
+        self.indent -= 1;
+
+        try self.writeIndent();
+        try self.output.writeAll("}\n");
+    }
+
+    fn generateSwitchExpr(self: *Generator, expr: ast.SwitchExpr, raw: bool) std.Io.Writer.Error!void {
+        try self.writeIndent();
+        try self.output.writeAll("switch (");
+        try self.output.writeAll(expr.value);
+        try self.output.writeAll(") {\n");
+
+        self.indent += 1;
+        for (expr.cases) |case| {
+            try self.writeIndent();
+            try self.output.writeAll(case.pattern);
+            try self.output.writeAll(" => ");
+            if (case.capture) |cap| {
+                try self.output.writeAll("|");
+                try self.output.writeAll(cap);
+                try self.output.writeAll("| ");
+            }
+            try self.output.writeAll("{\n");
+
+            self.indent += 1;
+            try self.generateBranch(case.body, raw);
+            self.indent -= 1;
+
+            try self.writeIndent();
+            try self.output.writeAll("},\n");
         }
         self.indent -= 1;
 
@@ -511,6 +577,38 @@ test "generate inline for" {
     const result = output.writer.buffer[0..output.writer.end];
     try std.testing.expect(std.mem.indexOf(u8, result, "for (tags) |tag|") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "<span>") != null);
+}
+
+test "generate switch statement" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const parser = @import("parser.zig");
+
+    const source =
+        \\templ Status(status: Status) {
+        \\    switch (status) {
+        \\        .active => {
+        \\            <span>Active</span>
+        \\        },
+        \\        .pending => |val| {
+        \\            <span>{val}</span>
+        \\        },
+        \\    }
+        \\}
+    ;
+
+    var p = parser.Parser.init(arena.allocator(), source);
+    const template = try p.parseTemplate();
+
+    var output: std.Io.Writer.Allocating = .init(arena.allocator());
+    var gen = Generator.init(&output.writer);
+    try gen.generate(template);
+
+    const result = output.writer.buffer[0..output.writer.end];
+    try std.testing.expect(std.mem.indexOf(u8, result, "switch (status)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, ".active =>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, ".pending => |val|") != null);
 }
 
 test "generate inline for with index" {

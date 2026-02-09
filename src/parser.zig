@@ -291,6 +291,11 @@ pub const Parser = struct {
             return .{ .if_stmt = try self.parseIfStatement() };
         }
 
+        // Block-level switch: switch (expr) { ... }
+        if (ctx == .template_body and self.check("switch ")) {
+            return .{ .switch_stmt = try self.parseSwitchStatement() };
+        }
+
         // Text content (only in template body context)
         if (ctx == .template_body) {
             return .{ .text = try self.parseText() };
@@ -451,6 +456,11 @@ pub const Parser = struct {
         // Check for inline for: for (iter) |cap| branch
         if (self.check("for ") or self.check("for(")) {
             return .{ .for_expr = try self.parseForExpr() };
+        }
+
+        // Check for inline switch: switch (expr) ...
+        if (self.check("switch ") or self.check("switch(")) {
+            return .{ .switch_expr = try self.parseSwitchExpr() };
         }
 
         // Check for inline element: <tag>...</tag>
@@ -661,6 +671,161 @@ pub const Parser = struct {
         return .{
             .iterable = iterable,
             .captures = captures,
+            .body = body,
+        };
+    }
+
+    // =========================================================================
+    // Block-level switch: switch (expr) { .case => { ... }, ... }
+    // =========================================================================
+
+    fn parseSwitchStatement(self: *Parser) Error!ast.SwitchStatement {
+        _ = self.match("switch");
+        self.skipSpaces();
+
+        // Parse value
+        if (!self.match("(")) return error.InvalidExpression;
+        const value = try self.parseZigCodeBalanced(1);
+        if (!self.match(")")) return error.UnmatchedBrace;
+
+        self.skipWhitespace();
+
+        // Parse cases
+        if (!self.match("{")) return error.UnexpectedChar;
+        var cases: std.ArrayList(ast.SwitchCase) = .empty;
+
+        while (true) {
+            self.skipWhitespace();
+            if (self.peek() == @as(u8, '}')) break;
+
+            const case = try self.parseSwitchCase();
+            try cases.append(self.allocator, case);
+
+            self.skipWhitespace();
+            _ = self.match(","); // optional comma
+        }
+
+        if (!self.match("}")) return error.UnmatchedBrace;
+
+        return .{
+            .value = value,
+            .cases = cases.items,
+        };
+    }
+
+    fn parseSwitchCase(self: *Parser) Error!ast.SwitchCase {
+        // Parse pattern: .foo, .bar, else, _, inline else, etc.
+        const pattern = try self.parseSwitchPattern();
+        self.skipSpaces();
+
+        // Arrow
+        if (!self.match("=>")) return error.UnexpectedChar;
+        self.skipSpaces();
+
+        // Optional capture: |val|
+        var capture: ?[]const u8 = null;
+        if (self.match("|")) {
+            const capture_start = self.pos;
+            while (self.peek()) |c| {
+                if (c == '|') break;
+                _ = self.advance();
+            }
+            capture = self.source[capture_start..self.pos];
+            if (!self.match("|")) return error.InvalidExpression;
+            self.skipWhitespace();
+        }
+
+        // Body: { nodes }
+        if (!self.match("{")) return error.UnexpectedChar;
+        const body = try self.parseNodes(.template_body);
+        self.skipWhitespace();
+        if (!self.match("}")) return error.UnmatchedBrace;
+
+        return .{
+            .pattern = pattern,
+            .capture = capture,
+            .body = body,
+        };
+    }
+
+    fn parseSwitchPattern(self: *Parser) Error![]const u8 {
+        const start = self.pos;
+        while (self.peek()) |c| {
+            // Pattern ends at | (capture) or = (arrow)
+            if (c == '|') break;
+            if (c == '=' and self.peekAhead(1) == @as(u8, '>')) break;
+            if (c == '{' or c == '}') break;
+            _ = self.advance();
+        }
+        const pattern = std.mem.trim(u8, self.source[start..self.pos], " \t\n\r");
+        if (pattern.len == 0) return error.UnexpectedChar;
+        return pattern;
+    }
+
+    // =========================================================================
+    // Inline switch: switch (expr) .case => branch, ...
+    // =========================================================================
+
+    fn parseSwitchExpr(self: *Parser) Error!ast.SwitchExpr {
+        _ = self.match("switch");
+        self.skipSpaces();
+
+        // Parse value
+        if (!self.match("(")) return error.InvalidExpression;
+        const value = try self.parseZigCodeBalanced(1);
+        if (!self.match(")")) return error.UnmatchedBrace;
+
+        self.skipSpaces();
+
+        // Parse inline cases (no outer braces in inline form)
+        var cases: std.ArrayList(ast.SwitchBranch) = .empty;
+
+        while (true) {
+            self.skipSpaces();
+            const c = self.peek() orelse break;
+            if (c == '}') break; // end of expression block
+
+            const branch = try self.parseSwitchBranch();
+            try cases.append(self.allocator, branch);
+
+            self.skipSpaces();
+            if (!self.match(",")) break; // no more cases
+        }
+
+        return .{
+            .value = value,
+            .cases = cases.items,
+        };
+    }
+
+    fn parseSwitchBranch(self: *Parser) Error!ast.SwitchBranch {
+        // Parse pattern
+        const pattern = try self.parseSwitchPattern();
+        self.skipSpaces();
+
+        // Arrow
+        if (!self.match("=>")) return error.UnexpectedChar;
+        self.skipSpaces();
+
+        // Optional capture
+        var capture: ?[]const u8 = null;
+        if (self.match("|")) {
+            const capture_start = self.pos;
+            while (self.peek()) |c| {
+                if (c == '|') break;
+                _ = self.advance();
+            }
+            capture = self.source[capture_start..self.pos];
+            if (!self.match("|")) return error.InvalidExpression;
+            self.skipSpaces();
+        }
+
+        // Branch body (element, component call, or zig code)
+        const body = try self.parseBranch();
+
+        return .{
+            .pattern = pattern,
+            .capture = capture,
             .body = body,
         };
     }
@@ -1359,6 +1524,85 @@ test "parse dotted component call" {
     const user_card = template.body[1].component_call;
     try std.testing.expectEqualStrings("ui.cards.UserCard", user_card.name);
     try std.testing.expectEqualStrings("user", user_card.args);
+}
+
+test "parse block switch statement" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ Status(status: Status) {
+        \\    switch (status) {
+        \\        .active => {
+        \\            <span class="green">Active</span>
+        \\        },
+        \\        .pending => {
+        \\            <span class="yellow">Pending</span>
+        \\        },
+        \\        else => {
+        \\            <span>Unknown</span>
+        \\        },
+        \\    }
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    try std.testing.expectEqual(@as(usize, 1), template.body.len);
+    const switch_stmt = template.body[0].switch_stmt;
+    try std.testing.expectEqualStrings("status", switch_stmt.value);
+    try std.testing.expectEqual(@as(usize, 3), switch_stmt.cases.len);
+
+    try std.testing.expectEqualStrings(".active", switch_stmt.cases[0].pattern);
+    try std.testing.expectEqualStrings(".pending", switch_stmt.cases[1].pattern);
+    try std.testing.expectEqualStrings("else", switch_stmt.cases[2].pattern);
+}
+
+test "parse switch with capture" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ Value(val: Value) {
+        \\    switch (val) {
+        \\        .int => |n| {
+        \\            <span>{n}</span>
+        \\        },
+        \\        .string => |s| {
+        \\            <span>{s}</span>
+        \\        },
+        \\    }
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const switch_stmt = template.body[0].switch_stmt;
+    try std.testing.expectEqualStrings("n", switch_stmt.cases[0].capture.?);
+    try std.testing.expectEqualStrings("s", switch_stmt.cases[1].capture.?);
+}
+
+test "parse inline switch" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ Badge(role: Role) {
+        \\    {switch (role) .admin => <span>Admin</span>, .user => <span>User</span>, else => <span>Guest</span>}
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const switch_expr = template.body[0].expr.content.switch_expr;
+    try std.testing.expectEqualStrings("role", switch_expr.value);
+    try std.testing.expectEqual(@as(usize, 3), switch_expr.cases.len);
+
+    try std.testing.expectEqualStrings(".admin", switch_expr.cases[0].pattern);
+    try std.testing.expect(switch_expr.cases[0].body == .element);
 }
 
 test "parse raw expression" {
