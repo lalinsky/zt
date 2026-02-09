@@ -1,8 +1,14 @@
 const std = @import("std");
 
 /// Writes a value to the writer, escaping HTML special characters.
+/// If the value has a `formatHtml` method, it's called directly (assumed safe).
 pub fn writeEscaped(writer: *std.Io.Writer, value: anytype) std.Io.Writer.Error!void {
     const T = @TypeOf(value);
+
+    // Check for formatHtml method - assumed to be pre-escaped/safe HTML
+    if (comptime std.meta.hasMethod(T, "formatHtml")) {
+        return value.formatHtml(writer);
+    }
 
     switch (@typeInfo(T)) {
         .pointer => |ptr| {
@@ -194,4 +200,38 @@ test "writeAttr with null skips attribute" {
     const maybe: ?[]const u8 = null;
     try writeAttr(&output.writer, "class", maybe);
     try std.testing.expectEqualStrings("", output.writer.buffer[0..output.writer.end]);
+}
+
+test "formatHtml is written raw" {
+    const Html = struct {
+        content: []const u8,
+
+        pub fn formatHtml(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            try writer.writeAll(self.content);
+        }
+    };
+
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+
+    const html = Html{ .content = "<b>bold</b>" };
+    try writeEscaped(&output.writer, html);
+    try std.testing.expectEqualStrings("<b>bold</b>", output.writer.buffer[0..output.writer.end]);
+}
+
+test "formatHtml works with pointer" {
+    const Html = struct {
+        content: []const u8,
+
+        pub fn formatHtml(self: *const @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            try writer.writeAll(self.content);
+        }
+    };
+
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+
+    const html = Html{ .content = "<i>italic</i>" };
+    try writeEscaped(&output.writer, &html);
+    try std.testing.expectEqualStrings("<i>italic</i>", output.writer.buffer[0..output.writer.end]);
 }
