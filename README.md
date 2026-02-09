@@ -1,16 +1,11 @@
-# zt - Zig Templating
+# Zig Templating
 
-A compile-time templating system for Zig that compiles `.zt` files to Zig code.
+Small HTML templating language that compiles to Zig at build-time.
+Inspired by [JSX], [Zeix] and [Templ].
 
-## Features
-
-- **Compile-time** - Templates are compiled to Zig code at build time
-- **Type-safe** - Full Zig type checking on template parameters and expressions
-- **Familiar syntax** - HTML with embedded Zig expressions
-- **Components** - Call other templates with `@Component(args)`
-- **Control flow** - `if`/`for` both block-level and inline
-- **Auto-escaping** - HTML entities escaped by default, `{!expr}` for raw output
-- **Optional attributes** - Attributes with `null` values are omitted entirely
+[JSX]: https://react.dev/learn#writing-markup-with-jsx
+[Zeix]: https://ziex.dev/
+[Templ]: https://templ.guide/
 
 ## Syntax
 
@@ -19,10 +14,19 @@ A compile-time templating system for Zig that compiles `.zt` files to Zig code.
 ```zig
 const User = @import("../models.zig").User;
 
-pub templ UserCard(user: User) {
+pub templ UserDetails(user: User) {
     <div class="card">
         <h2>{user.name}</h2>
         <p>{user.email}</p>
+    </div>
+}
+
+pub templ UserList(users: []const User) {
+    <h1>Users</h1>
+    <div>
+        for (users) |user| {
+            @UserDetails(user)
+        }
     </div>
 }
 ```
@@ -170,31 +174,3 @@ pub fn handleRequest(writer: anytype) !void {
     try templates.Page(user, writer);
 }
 ```
-
-## Generated Output
-
-Templates compile to regular Zig functions:
-
-```zig
-// hello.zt
-pub templ Hello(name: []const u8) {
-    <div class="greeting">
-        <h1>Hello, {name}!</h1>
-    </div>
-}
-
-// hello.zig (generated)
-pub fn Hello(name: []const u8, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-    try writer.writeAll("<div class=\"greeting\">");
-    try writer.writeAll("<h1>");
-    try writer.writeAll("Hello, ");
-    try zt.writeEscaped(writer, name);
-    try writer.writeAll("!");
-    try writer.writeAll("</h1>");
-    try writer.writeAll("</div>");
-}
-```
-
-## License
-
-MIT
