@@ -111,7 +111,12 @@ pub const SwitchStatement = struct {
 pub const SwitchCase = struct {
     pattern: []const u8, // ".active", "else", ".foo, .bar", etc.
     capture: ?[]const u8, // |val| capture if present
-    body: []const Node,
+    body: Body,
+
+    pub const Body = union(enum) {
+        nodes: []const Node, // { ... } block with multiple nodes
+        branch: Branch, // single element/component/zig_code
+    };
 };
 
 /// Inline switch expression

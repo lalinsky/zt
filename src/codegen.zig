@@ -311,8 +311,13 @@ pub const Generator = struct {
             try self.output.writeAll("{\n");
 
             self.indent += 1;
-            for (case.body) |node| {
-                try self.generateNode(node);
+            switch (case.body) {
+                .nodes => |nodes| {
+                    for (nodes) |node| {
+                        try self.generateNode(node);
+                    }
+                },
+                .branch => |branch| try self.generateBranch(branch, false),
             }
             self.indent -= 1;
 

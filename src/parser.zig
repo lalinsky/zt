@@ -735,11 +735,13 @@ pub const Parser = struct {
             self.skipWhitespace();
         }
 
-        // Body: { nodes }
-        if (!self.match("{")) return error.UnexpectedChar;
-        const body = try self.parseNodes(.template_body);
-        self.skipWhitespace();
-        if (!self.match("}")) return error.UnmatchedBrace;
+        // Body: { nodes } or single branch
+        const body: ast.SwitchCase.Body = if (self.match("{")) blk: {
+            const nodes = try self.parseNodes(.template_body);
+            self.skipWhitespace();
+            if (!self.match("}")) return error.UnmatchedBrace;
+            break :blk .{ .nodes = nodes };
+        } else .{ .branch = try self.parseBranch() };
 
         return .{
             .pattern = pattern,
@@ -1582,6 +1584,42 @@ test "parse switch with capture" {
     const switch_stmt = template.body[0].switch_stmt;
     try std.testing.expectEqualStrings("n", switch_stmt.cases[0].capture.?);
     try std.testing.expectEqualStrings("s", switch_stmt.cases[1].capture.?);
+}
+
+test "parse switch with mixed block and non-block cases" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ Status(status: Status) {
+        \\    switch (status) {
+        \\        .active => <span>Active</span>,
+        \\        .pending => {
+        \\            <span>Pending</span>
+        \\            <span>Please wait</span>
+        \\        },
+        \\        else => @Unknown(),
+        \\    }
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const switch_stmt = template.body[0].switch_stmt;
+    try std.testing.expectEqual(@as(usize, 3), switch_stmt.cases.len);
+
+    // First case: single element (branch)
+    try std.testing.expect(switch_stmt.cases[0].body == .branch);
+    try std.testing.expect(switch_stmt.cases[0].body.branch == .element);
+
+    // Second case: block with nodes
+    try std.testing.expect(switch_stmt.cases[1].body == .nodes);
+    try std.testing.expectEqual(@as(usize, 2), switch_stmt.cases[1].body.nodes.len);
+
+    // Third case: component call (branch)
+    try std.testing.expect(switch_stmt.cases[2].body == .branch);
+    try std.testing.expect(switch_stmt.cases[2].body.branch == .component_call);
 }
 
 test "parse inline switch" {
