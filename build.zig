@@ -11,6 +11,25 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // CLI tool
+    const exe = b.addExecutable(.{
+        .name = "zt-compile",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    b.installArtifact(exe);
+
+    const run_cmd = b.addRunArtifact(exe);
+    run_cmd.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        run_cmd.addArgs(args);
+    }
+    const run_step = b.step("run", "Run zt-compile");
+    run_step.dependOn(&run_cmd.step);
+
     // Tests
     const test_module = b.createModule(.{
         .root_source_file = b.path("src/zt.zig"),
@@ -75,7 +94,10 @@ pub const TemplateGenStep = struct {
 
             var parser = zt.Parser.init(arena.allocator(), source);
             const file = parser.parseFile() catch |err| {
-                return step.fail("Failed to parse template '{s}': {}", .{ template_path, err });
+                if (parser.err) |e| {
+                    return step.fail("{s}:{d}:{d}: {s}", .{ template_path, e.line, e.col, e.msg });
+                }
+                return step.fail("{s}: parse error: {}", .{ template_path, err });
             };
 
             // Generate

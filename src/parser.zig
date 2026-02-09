@@ -1,12 +1,19 @@
 const std = @import("std");
 const ast = @import("ast.zig");
 
+pub const ParseError = struct {
+    line: usize,
+    col: usize,
+    msg: []const u8,
+};
+
 pub const Parser = struct {
     source: []const u8,
     pos: usize,
     line: usize,
     col: usize,
     allocator: std.mem.Allocator,
+    err: ?ParseError = null,
 
     pub const Error = error{
         UnexpectedChar,
@@ -17,6 +24,7 @@ pub const Parser = struct {
         ExpectedClosingTag,
         InvalidExpression,
         OutOfMemory,
+        ParseError,
     };
 
     pub fn init(allocator: std.mem.Allocator, source: []const u8) Parser {
@@ -27,6 +35,15 @@ pub const Parser = struct {
             .col = 1,
             .allocator = allocator,
         };
+    }
+
+    fn fail(self: *Parser, comptime fmt: []const u8, args: anytype) Error {
+        self.err = .{
+            .line = self.line,
+            .col = self.col,
+            .msg = std.fmt.allocPrint(self.allocator, fmt, args) catch "error",
+        };
+        return error.ParseError;
     }
 
     // =========================================================================
@@ -176,24 +193,24 @@ pub const Parser = struct {
         if (is_public) self.skipWhitespace();
 
         if (!self.match("templ ")) {
-            return error.UnexpectedChar;
+            return self.fail("expected 'templ' keyword", .{});
         }
         self.skipWhitespace();
 
         const name = try self.parseIdentifier();
         self.skipWhitespace();
 
-        if (!self.match("(")) return error.UnexpectedChar;
+        if (!self.match("(")) return self.fail("expected '(' after template name", .{});
         const params = try self.parseUntil(')');
-        if (!self.match(")")) return error.UnexpectedChar;
+        if (!self.match(")")) return self.fail("expected ')' after template parameters", .{});
 
         self.skipWhitespace();
-        if (!self.match("{")) return error.UnexpectedChar;
+        if (!self.match("{")) return self.fail("expected '{{' to start template body", .{});
 
         const body = try self.parseNodes(.template_body);
 
         self.skipWhitespace();
-        if (!self.match("}")) return error.UnmatchedBrace;
+        if (!self.match("}")) return self.fail("expected '}}' to close template body", .{});
 
         return .{
             .name = name,
@@ -212,7 +229,7 @@ pub const Parser = struct {
                 break;
             }
         }
-        if (self.pos == start) return error.UnexpectedChar;
+        if (self.pos == start) return self.fail("expected identifier", .{});
         return self.source[start..self.pos];
     }
 
@@ -309,7 +326,7 @@ pub const Parser = struct {
     // =========================================================================
 
     fn parseElement(self: *Parser) Error!ast.Element {
-        if (!self.match("<")) return error.InvalidTag;
+        if (!self.match("<")) return self.fail("expected '<'", .{});
 
         const tag = try self.parseTagName();
         const attributes = try self.parseAttributes();
@@ -327,18 +344,18 @@ pub const Parser = struct {
         }
 
         // Opening tag: <tag>
-        if (!self.match(">")) return error.InvalidTag;
+        if (!self.match(">")) return self.fail("expected '>' to close opening tag", .{});
 
         // Parse children
         const children = try self.parseNodes(.template_body);
 
         // Closing tag: </tag>
         self.skipWhitespace();
-        if (!self.match("</")) return error.ExpectedClosingTag;
+        if (!self.match("</")) return self.fail("expected closing tag '</{s}>'", .{tag});
         const closing_tag = try self.parseTagName();
-        if (!std.mem.eql(u8, tag, closing_tag)) return error.ExpectedClosingTag;
+        if (!std.mem.eql(u8, tag, closing_tag)) return self.fail("mismatched closing tag: expected '</{s}>', found '</{s}>'", .{ tag, closing_tag });
         self.skipSpaces();
-        if (!self.match(">")) return error.ExpectedClosingTag;
+        if (!self.match(">")) return self.fail("expected '>' to close tag", .{});
 
         return .{
             .tag = tag,
@@ -357,7 +374,7 @@ pub const Parser = struct {
                 break;
             }
         }
-        if (self.pos == start) return error.InvalidTag;
+        if (self.pos == start) return self.fail("expected tag name", .{});
         return self.source[start..self.pos];
     }
 
@@ -388,13 +405,13 @@ pub const Parser = struct {
         _ = self.match("=");
         self.skipSpaces();
 
-        const c = self.peek() orelse return error.InvalidAttribute;
+        const c = self.peek() orelse return self.fail("expected attribute value after '='", .{});
 
         // Dynamic attribute: attr={expr}
         if (c == '{') {
             _ = self.advance(); // consume {
             const expr = try self.parseZigCodeBalanced(0);
-            if (!self.match("}")) return error.UnmatchedBrace;
+            if (!self.match("}")) return self.fail("expected '}}' to close dynamic attribute", .{});
             return .{ .name = name, .value = .{ .dynamic = expr } };
         }
 
@@ -411,7 +428,7 @@ pub const Parser = struct {
             return .{ .name = name, .value = .{ .static = value } };
         }
 
-        return error.InvalidAttribute;
+        return self.fail("expected '\"', \"'\", or '{{' for attribute value", .{});
     }
 
     fn parseAttributeName(self: *Parser) Error![]const u8 {
@@ -423,7 +440,7 @@ pub const Parser = struct {
                 break;
             }
         }
-        if (self.pos == start) return error.InvalidAttribute;
+        if (self.pos == start) return self.fail("expected attribute name", .{});
         return self.source[start..self.pos];
     }
 
@@ -432,7 +449,7 @@ pub const Parser = struct {
     // =========================================================================
 
     fn parseExprBlock(self: *Parser) Error!ast.Expr {
-        if (!self.match("{")) return error.UnexpectedChar;
+        if (!self.match("{")) return self.fail("expected '{{'", .{});
 
         // Check for raw output: {!expr}
         const is_raw = self.match("!");
@@ -442,7 +459,7 @@ pub const Parser = struct {
         const content = try self.parseExprContent();
 
         self.skipSpaces();
-        if (!self.match("}")) return error.UnmatchedBrace;
+        if (!self.match("}")) return self.fail("expected '}}' to close expression", .{});
 
         return .{ .content = content, .raw = is_raw };
     }
@@ -483,9 +500,9 @@ pub const Parser = struct {
         self.skipSpaces();
 
         // Parse condition: (cond)
-        if (!self.match("(")) return error.InvalidExpression;
+        if (!self.match("(")) return self.fail("expected '(' after 'if'", .{});
         const condition = try self.parseZigCodeBalanced(1);
-        if (!self.match(")")) return error.UnmatchedBrace;
+        if (!self.match(")")) return self.fail("expected ')' after if condition", .{});
 
         self.skipSpaces();
 
@@ -507,7 +524,7 @@ pub const Parser = struct {
     }
 
     fn parseBranch(self: *Parser) Error!ast.Branch {
-        const c = self.peek() orelse return error.UnexpectedEof;
+        const c = self.peek() orelse return self.fail("unexpected end of file in branch", .{});
 
         // Element branch: <tag>...</tag>
         if (c == '<' and !self.check("</")) {
@@ -530,14 +547,14 @@ pub const Parser = struct {
     // =========================================================================
 
     fn parseComponentCall(self: *Parser) Error!ast.ComponentCall {
-        if (!self.match("@")) return error.UnexpectedChar;
+        if (!self.match("@")) return self.fail("expected '@' for component call", .{});
 
         const name = try self.parseDottedIdentifier();
         self.skipSpaces();
 
-        if (!self.match("(")) return error.UnexpectedChar;
+        if (!self.match("(")) return self.fail("expected '(' after component name", .{});
         const args = try self.parseZigCodeBalanced(1);
-        if (!self.match(")")) return error.UnmatchedBrace;
+        if (!self.match(")")) return self.fail("expected ')' after component arguments", .{});
 
         return .{
             .name = name,
@@ -555,7 +572,7 @@ pub const Parser = struct {
                 break;
             }
         }
-        if (self.pos == start) return error.UnexpectedChar;
+        if (self.pos == start) return self.fail("expected component name", .{});
         return self.source[start..self.pos];
     }
 
@@ -568,21 +585,21 @@ pub const Parser = struct {
         self.skipSpaces();
 
         // Parse iterable: (iter)
-        if (!self.match("(")) return error.InvalidExpression;
+        if (!self.match("(")) return self.fail("expected '(' after 'for'", .{});
         const iterable = try self.parseZigCodeBalanced(1);
-        if (!self.match(")")) return error.UnmatchedBrace;
+        if (!self.match(")")) return self.fail("expected ')' after for iterable", .{});
 
         self.skipSpaces();
 
         // Parse captures: |item| or |item, index|
-        if (!self.match("|")) return error.InvalidExpression;
+        if (!self.match("|")) return self.fail("expected '|' to start captures", .{});
         const captures_start = self.pos;
         while (self.peek()) |c| {
             if (c == '|') break;
             _ = self.advance();
         }
         const captures = self.source[captures_start..self.pos];
-        if (!self.match("|")) return error.InvalidExpression;
+        if (!self.match("|")) return self.fail("expected '|' to close captures", .{});
 
         self.skipSpaces();
 
@@ -605,26 +622,26 @@ pub const Parser = struct {
         self.skipSpaces();
 
         // Parse condition
-        if (!self.match("(")) return error.InvalidExpression;
+        if (!self.match("(")) return self.fail("expected '(' after 'if'", .{});
         const condition = try self.parseZigCodeBalanced(1);
-        if (!self.match(")")) return error.UnmatchedBrace;
+        if (!self.match(")")) return self.fail("expected ')' after if condition", .{});
 
         self.skipWhitespace();
 
         // Parse then body
-        if (!self.match("{")) return error.UnexpectedChar;
+        if (!self.match("{")) return self.fail("expected '{{' after if condition", .{});
         const then_body = try self.parseNodes(.template_body);
         self.skipWhitespace();
-        if (!self.match("}")) return error.UnmatchedBrace;
+        if (!self.match("}")) return self.fail("expected '}}' to close if body", .{});
 
         // Check for else
         self.skipWhitespace();
         const else_body: ?[]const ast.Node = if (self.match("else")) blk: {
             self.skipWhitespace();
-            if (!self.match("{")) return error.UnexpectedChar;
+            if (!self.match("{")) return self.fail("expected '{{' after 'else'", .{});
             const body = try self.parseNodes(.template_body);
             self.skipWhitespace();
-            if (!self.match("}")) return error.UnmatchedBrace;
+            if (!self.match("}")) return self.fail("expected '}}' to close else body", .{});
             break :blk body;
         } else null;
 
@@ -644,29 +661,29 @@ pub const Parser = struct {
         self.skipSpaces();
 
         // Parse iterable
-        if (!self.match("(")) return error.InvalidExpression;
+        if (!self.match("(")) return self.fail("expected '(' after 'for'", .{});
         const iterable = try self.parseZigCodeBalanced(1);
-        if (!self.match(")")) return error.UnmatchedBrace;
+        if (!self.match(")")) return self.fail("expected ')' after for iterable", .{});
 
         self.skipSpaces();
 
         // Parse captures
-        if (!self.match("|")) return error.InvalidExpression;
+        if (!self.match("|")) return self.fail("expected '|' to start captures", .{});
         const captures_start = self.pos;
         while (self.peek()) |c| {
             if (c == '|') break;
             _ = self.advance();
         }
         const captures = self.source[captures_start..self.pos];
-        if (!self.match("|")) return error.InvalidExpression;
+        if (!self.match("|")) return self.fail("expected '|' to close captures", .{});
 
         self.skipWhitespace();
 
         // Parse body
-        if (!self.match("{")) return error.UnexpectedChar;
+        if (!self.match("{")) return self.fail("expected '{{' after for captures", .{});
         const body = try self.parseNodes(.template_body);
         self.skipWhitespace();
-        if (!self.match("}")) return error.UnmatchedBrace;
+        if (!self.match("}")) return self.fail("expected '}}' to close for body", .{});
 
         return .{
             .iterable = iterable,
@@ -684,14 +701,14 @@ pub const Parser = struct {
         self.skipSpaces();
 
         // Parse value
-        if (!self.match("(")) return error.InvalidExpression;
+        if (!self.match("(")) return self.fail("expected '(' after 'switch'", .{});
         const value = try self.parseZigCodeBalanced(1);
-        if (!self.match(")")) return error.UnmatchedBrace;
+        if (!self.match(")")) return self.fail("expected ')' after switch expression", .{});
 
         self.skipWhitespace();
 
         // Parse cases
-        if (!self.match("{")) return error.UnexpectedChar;
+        if (!self.match("{")) return self.fail("expected '{{' to start switch body", .{});
         var cases: std.ArrayList(ast.SwitchCase) = .empty;
 
         while (true) {
@@ -705,7 +722,7 @@ pub const Parser = struct {
             _ = self.match(","); // optional comma
         }
 
-        if (!self.match("}")) return error.UnmatchedBrace;
+        if (!self.match("}")) return self.fail("expected '}}' to close switch body", .{});
 
         return .{
             .value = value,
@@ -719,7 +736,7 @@ pub const Parser = struct {
         self.skipSpaces();
 
         // Arrow
-        if (!self.match("=>")) return error.UnexpectedChar;
+        if (!self.match("=>")) return self.fail("expected '=>' after switch pattern", .{});
         self.skipSpaces();
 
         // Optional capture: |val|
@@ -731,7 +748,7 @@ pub const Parser = struct {
                 _ = self.advance();
             }
             capture = self.source[capture_start..self.pos];
-            if (!self.match("|")) return error.InvalidExpression;
+            if (!self.match("|")) return self.fail("expected '|' to close capture", .{});
             self.skipWhitespace();
         }
 
@@ -739,7 +756,7 @@ pub const Parser = struct {
         const body: ast.SwitchCase.Body = if (self.match("{")) blk: {
             const nodes = try self.parseNodes(.template_body);
             self.skipWhitespace();
-            if (!self.match("}")) return error.UnmatchedBrace;
+            if (!self.match("}")) return self.fail("expected '}}' to close switch case body", .{});
             break :blk .{ .nodes = nodes };
         } else .{ .branch = try self.parseBranch() };
 
@@ -760,7 +777,7 @@ pub const Parser = struct {
             _ = self.advance();
         }
         const pattern = std.mem.trim(u8, self.source[start..self.pos], " \t\n\r");
-        if (pattern.len == 0) return error.UnexpectedChar;
+        if (pattern.len == 0) return self.fail("expected switch pattern", .{});
         return pattern;
     }
 
@@ -773,9 +790,9 @@ pub const Parser = struct {
         self.skipSpaces();
 
         // Parse value
-        if (!self.match("(")) return error.InvalidExpression;
+        if (!self.match("(")) return self.fail("expected '(' after 'switch'", .{});
         const value = try self.parseZigCodeBalanced(1);
-        if (!self.match(")")) return error.UnmatchedBrace;
+        if (!self.match(")")) return self.fail("expected ')' after switch expression", .{});
 
         self.skipSpaces();
 
@@ -806,7 +823,7 @@ pub const Parser = struct {
         self.skipSpaces();
 
         // Arrow
-        if (!self.match("=>")) return error.UnexpectedChar;
+        if (!self.match("=>")) return self.fail("expected '=>' after switch pattern", .{});
         self.skipSpaces();
 
         // Optional capture
@@ -818,7 +835,7 @@ pub const Parser = struct {
                 _ = self.advance();
             }
             capture = self.source[capture_start..self.pos];
-            if (!self.match("|")) return error.InvalidExpression;
+            if (!self.match("|")) return self.fail("expected '|' to close capture", .{});
             self.skipSpaces();
         }
 
@@ -984,13 +1001,13 @@ pub const Parser = struct {
     fn skipComment(self: *Parser) Error!void {
         if (self.match("<!--")) {
             while (!self.check("-->")) {
-                if (self.advance() == null) return error.UnexpectedEof;
+                if (self.advance() == null) return self.fail("unexpected end of file in comment", .{});
             }
             _ = self.match("-->");
         } else if (self.match("<!")) {
             // DOCTYPE or similar
             while (self.peek() != @as(u8, '>')) {
-                if (self.advance() == null) return error.UnexpectedEof;
+                if (self.advance() == null) return self.fail("unexpected end of file in doctype", .{});
             }
             _ = self.advance();
         }
