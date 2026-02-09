@@ -1,0 +1,31 @@
+const User = @import("../models.zig").User;
+
+pub templ hello(name: []const u8) {
+    <div class="greeting">
+        <h1>Hello, {name}!</h1>
+    </div>
+}
+
+pub templ list(items: []const []const u8) {
+    <ul>
+        for (items) |item| {
+            <li>{item}</li>
+        }
+    </ul>
+}
+
+pub templ userCard(user: User) {
+    <div class="user-card">
+        <h2>{user.name}</h2>
+        <p>{user.email}</p>
+        {if (user.is_admin) <span class="badge">Admin</span>}
+    </div>
+}
+
+pub templ userList(users: []const User) {
+    <div class="user-list">
+        for (users) |user| {
+            @userCard(user)
+        }
+    </div>
+}

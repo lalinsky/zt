@@ -1,0 +1,6 @@
+.zig-cache/
+zig-out/
+*.zig~
+
+# Generated template files
+examples/src/templates/*.zig

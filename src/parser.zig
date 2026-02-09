@@ -1,0 +1,1402 @@
+const std = @import("std");
+const ast = @import("ast.zig");
+
+pub const Parser = struct {
+    source: []const u8,
+    pos: usize,
+    line: usize,
+    col: usize,
+    allocator: std.mem.Allocator,
+
+    pub const Error = error{
+        UnexpectedChar,
+        UnexpectedEof,
+        UnmatchedBrace,
+        InvalidTag,
+        InvalidAttribute,
+        ExpectedClosingTag,
+        InvalidExpression,
+        OutOfMemory,
+    };
+
+    pub fn init(allocator: std.mem.Allocator, source: []const u8) Parser {
+        return .{
+            .source = source,
+            .pos = 0,
+            .line = 1,
+            .col = 1,
+            .allocator = allocator,
+        };
+    }
+
+    // =========================================================================
+    // Core utilities
+    // =========================================================================
+
+    fn peek(self: *Parser) ?u8 {
+        if (self.pos >= self.source.len) return null;
+        return self.source[self.pos];
+    }
+
+    fn peekAhead(self: *Parser, offset: usize) ?u8 {
+        const idx = self.pos + offset;
+        if (idx >= self.source.len) return null;
+        return self.source[idx];
+    }
+
+    fn advance(self: *Parser) ?u8 {
+        if (self.pos >= self.source.len) return null;
+        const c = self.source[self.pos];
+        self.pos += 1;
+        if (c == '\n') {
+            self.line += 1;
+            self.col = 1;
+        } else {
+            self.col += 1;
+        }
+        return c;
+    }
+
+    fn match(self: *Parser, expected: []const u8) bool {
+        if (self.pos + expected.len > self.source.len) return false;
+        if (std.mem.eql(u8, self.source[self.pos..][0..expected.len], expected)) {
+            for (expected) |c| {
+                if (c == '\n') {
+                    self.line += 1;
+                    self.col = 1;
+                } else {
+                    self.col += 1;
+                }
+            }
+            self.pos += expected.len;
+            return true;
+        }
+        return false;
+    }
+
+    fn check(self: *Parser, expected: []const u8) bool {
+        if (self.pos + expected.len > self.source.len) return false;
+        return std.mem.eql(u8, self.source[self.pos..][0..expected.len], expected);
+    }
+
+    fn skipWhitespace(self: *Parser) void {
+        while (self.peek()) |c| {
+            if (c == ' ' or c == '\t' or c == '\n' or c == '\r') {
+                _ = self.advance();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn skipSpaces(self: *Parser) void {
+        while (self.peek()) |c| {
+            if (c == ' ' or c == '\t') {
+                _ = self.advance();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn location(self: *Parser) ast.Location {
+        return .{ .line = self.line, .column = self.col };
+    }
+
+    // =========================================================================
+    // Template parsing: pub templ name(params) { body }
+    // =========================================================================
+
+    /// Parse a file containing one or more templates and Zig code
+    pub fn parseFile(self: *Parser) Error!ast.TemplateFile {
+        var zig_code_parts: std.ArrayList([]const u8) = .empty;
+        var templates: std.ArrayList(ast.Template) = .empty;
+
+        while (self.peek() != null) {
+            self.skipWhitespace();
+            if (self.peek() == null) break;
+
+            // Check if we're at a template start
+            if (self.isAtTemplate()) {
+                const template = try self.parseTemplate();
+                try templates.append(self.allocator, template);
+            } else {
+                // Parse Zig code until next template or EOF
+                const zig_start = self.pos;
+                while (self.peek() != null and !self.isAtTemplate()) {
+                    self.skipToNextLine();
+                }
+                const zig_code = std.mem.trim(u8, self.source[zig_start..self.pos], " \t\n\r");
+                if (zig_code.len > 0) {
+                    try zig_code_parts.append(self.allocator, zig_code);
+                }
+            }
+        }
+
+        // Join all Zig code parts with newlines
+        const header = if (zig_code_parts.items.len == 0)
+            ""
+        else if (zig_code_parts.items.len == 1)
+            zig_code_parts.items[0]
+        else
+            try std.mem.join(self.allocator, "\n\n", zig_code_parts.items);
+
+        return .{ .header = header, .templates = templates.items };
+    }
+
+    fn isAtTemplate(self: *Parser) bool {
+        if (self.check("templ ")) return true;
+        if (self.check("pub ")) {
+            // Look ahead past "pub " to check for "templ"
+            const saved_pos = self.pos;
+            const saved_line = self.line;
+            const saved_col = self.col;
+            _ = self.match("pub ");
+            self.skipWhitespace();
+            const is_templ = self.check("templ ");
+            self.pos = saved_pos;
+            self.line = saved_line;
+            self.col = saved_col;
+            return is_templ;
+        }
+        return false;
+    }
+
+    fn skipToNextLine(self: *Parser) void {
+        while (self.peek()) |c| {
+            _ = self.advance();
+            if (c == '\n') break;
+        }
+    }
+
+    pub fn parseTemplate(self: *Parser) Error!ast.Template {
+        self.skipWhitespace();
+
+        const is_public = self.match("pub ");
+        if (is_public) self.skipWhitespace();
+
+        if (!self.match("templ ")) {
+            return error.UnexpectedChar;
+        }
+        self.skipWhitespace();
+
+        const name = try self.parseIdentifier();
+        self.skipWhitespace();
+
+        if (!self.match("(")) return error.UnexpectedChar;
+        const params = try self.parseUntil(')');
+        if (!self.match(")")) return error.UnexpectedChar;
+
+        self.skipWhitespace();
+        if (!self.match("{")) return error.UnexpectedChar;
+
+        const body = try self.parseNodes(.template_body);
+
+        self.skipWhitespace();
+        if (!self.match("}")) return error.UnmatchedBrace;
+
+        return .{
+            .name = name,
+            .params = params,
+            .is_public = is_public,
+            .body = body,
+        };
+    }
+
+    fn parseIdentifier(self: *Parser) Error![]const u8 {
+        const start = self.pos;
+        while (self.peek()) |c| {
+            if (std.ascii.isAlphanumeric(c) or c == '_') {
+                _ = self.advance();
+            } else {
+                break;
+            }
+        }
+        if (self.pos == start) return error.UnexpectedChar;
+        return self.source[start..self.pos];
+    }
+
+    /// Parse until we hit the target char (not consuming it)
+    fn parseUntil(self: *Parser, target: u8) Error![]const u8 {
+        const start = self.pos;
+        while (self.peek()) |c| {
+            if (c == target) break;
+            _ = self.advance();
+        }
+        return self.source[start..self.pos];
+    }
+
+    // =========================================================================
+    // Node parsing - the main recursive descent
+    // =========================================================================
+
+    const Context = enum {
+        template_body, // Top-level or inside element
+        expression, // Inside { }
+    };
+
+    fn parseNodes(self: *Parser, ctx: Context) Error![]const ast.Node {
+        var nodes: std.ArrayList(ast.Node) = .empty;
+
+        while (true) {
+            self.skipWhitespace();
+
+            const c = self.peek() orelse break;
+
+            // End conditions based on context
+            if (ctx == .template_body and c == '}') break;
+            if (ctx == .template_body and c == '<' and self.check("</")) break;
+
+            if (try self.parseNode(ctx)) |node| {
+                try nodes.append(self.allocator, node);
+            } else {
+                break;
+            }
+        }
+
+        return nodes.items;
+    }
+
+    fn parseNode(self: *Parser, ctx: Context) Error!?ast.Node {
+        const c = self.peek() orelse return null;
+
+        // Element: <tag ...>
+        if (c == '<') {
+            if (self.check("</")) return null; // Closing tag, not a node
+            if (self.check("<!")) {
+                // Skip comments/doctype for now
+                try self.skipComment();
+                return self.parseNode(ctx);
+            }
+            return .{ .element = try self.parseElement() };
+        }
+
+        // Component call: @Name(args)
+        if (c == '@') {
+            return .{ .component_call = try self.parseComponentCall() };
+        }
+
+        // Expression block: { ... }
+        if (c == '{') {
+            return .{ .expr = try self.parseExprBlock() };
+        }
+
+        // Block-level for: for (iter) |cap| { ... }
+        if (ctx == .template_body and self.check("for ")) {
+            return .{ .for_stmt = try self.parseForStatement() };
+        }
+
+        // Block-level if: if (cond) { ... }
+        if (ctx == .template_body and self.check("if ")) {
+            return .{ .if_stmt = try self.parseIfStatement() };
+        }
+
+        // Text content (only in template body context)
+        if (ctx == .template_body) {
+            return .{ .text = try self.parseText() };
+        }
+
+        return null;
+    }
+
+    // =========================================================================
+    // Element parsing: <tag attr="val">children</tag> or <tag />
+    // =========================================================================
+
+    fn parseElement(self: *Parser) Error!ast.Element {
+        if (!self.match("<")) return error.InvalidTag;
+
+        const tag = try self.parseTagName();
+        const attributes = try self.parseAttributes();
+
+        self.skipSpaces();
+
+        // Self-closing: <tag />
+        if (self.match("/>")) {
+            return .{
+                .tag = tag,
+                .attributes = attributes,
+                .children = &[_]ast.Node{},
+                .self_closing = true,
+            };
+        }
+
+        // Opening tag: <tag>
+        if (!self.match(">")) return error.InvalidTag;
+
+        // Parse children
+        const children = try self.parseNodes(.template_body);
+
+        // Closing tag: </tag>
+        self.skipWhitespace();
+        if (!self.match("</")) return error.ExpectedClosingTag;
+        const closing_tag = try self.parseTagName();
+        if (!std.mem.eql(u8, tag, closing_tag)) return error.ExpectedClosingTag;
+        self.skipSpaces();
+        if (!self.match(">")) return error.ExpectedClosingTag;
+
+        return .{
+            .tag = tag,
+            .attributes = attributes,
+            .children = children,
+            .self_closing = false,
+        };
+    }
+
+    fn parseTagName(self: *Parser) Error![]const u8 {
+        const start = self.pos;
+        while (self.peek()) |c| {
+            if (std.ascii.isAlphanumeric(c) or c == '-' or c == '_' or c == ':') {
+                _ = self.advance();
+            } else {
+                break;
+            }
+        }
+        if (self.pos == start) return error.InvalidTag;
+        return self.source[start..self.pos];
+    }
+
+    fn parseAttributes(self: *Parser) Error![]const ast.Attribute {
+        var attrs: std.ArrayList(ast.Attribute) = .empty;
+
+        while (true) {
+            self.skipSpaces();
+            const c = self.peek() orelse break;
+            if (c == '>' or c == '/') break;
+
+            const attr = try self.parseAttribute();
+            try attrs.append(self.allocator, attr);
+        }
+
+        return attrs.items;
+    }
+
+    fn parseAttribute(self: *Parser) Error!ast.Attribute {
+        const name = try self.parseAttributeName();
+        self.skipSpaces();
+
+        // Boolean attribute (no value)
+        if (self.peek() != @as(u8, '=')) {
+            return .{ .name = name, .value = .none };
+        }
+
+        _ = self.match("=");
+        self.skipSpaces();
+
+        const c = self.peek() orelse return error.InvalidAttribute;
+
+        // Dynamic attribute: attr={expr}
+        if (c == '{') {
+            _ = self.advance(); // consume {
+            const expr = try self.parseZigCodeBalanced(0);
+            if (!self.match("}")) return error.UnmatchedBrace;
+            return .{ .name = name, .value = .{ .dynamic = expr } };
+        }
+
+        // Static attribute: attr="value" or attr='value'
+        if (c == '"' or c == '\'') {
+            const quote = self.advance().?;
+            const start = self.pos;
+            while (self.peek()) |ch| {
+                if (ch == quote) break;
+                _ = self.advance();
+            }
+            const value = self.source[start..self.pos];
+            _ = self.advance(); // consume closing quote
+            return .{ .name = name, .value = .{ .static = value } };
+        }
+
+        return error.InvalidAttribute;
+    }
+
+    fn parseAttributeName(self: *Parser) Error![]const u8 {
+        const start = self.pos;
+        while (self.peek()) |c| {
+            if (std.ascii.isAlphanumeric(c) or c == '-' or c == '_' or c == ':' or c == '@') {
+                _ = self.advance();
+            } else {
+                break;
+            }
+        }
+        if (self.pos == start) return error.InvalidAttribute;
+        return self.source[start..self.pos];
+    }
+
+    // =========================================================================
+    // Expression block: { ... }
+    // =========================================================================
+
+    fn parseExprBlock(self: *Parser) Error!ast.Expr {
+        if (!self.match("{")) return error.UnexpectedChar;
+
+        // Check for raw output: {!expr}
+        const is_raw = self.match("!");
+
+        self.skipSpaces();
+
+        const content = try self.parseExprContent();
+
+        self.skipSpaces();
+        if (!self.match("}")) return error.UnmatchedBrace;
+
+        return .{ .content = content, .raw = is_raw };
+    }
+
+    fn parseExprContent(self: *Parser) Error!ast.Expr.Content {
+        // Check for inline if: if (cond) branch else branch
+        if (self.check("if ") or self.check("if(")) {
+            return .{ .if_expr = try self.parseIfExpr() };
+        }
+
+        // Check for inline for: for (iter) |cap| branch
+        if (self.check("for ") or self.check("for(")) {
+            return .{ .for_expr = try self.parseForExpr() };
+        }
+
+        // Check for inline element: <tag>...</tag>
+        if (self.peek() == @as(u8, '<') and !self.check("</")) {
+            const elem = try self.allocator.create(ast.Element);
+            elem.* = try self.parseElement();
+            return .{ .element = elem };
+        }
+
+        // Plain Zig code
+        return .{ .zig_code = try self.parseZigCodeBalanced(0) };
+    }
+
+    // =========================================================================
+    // Inline if: if (cond) branch else branch
+    // =========================================================================
+
+    fn parseIfExpr(self: *Parser) Error!ast.IfExpr {
+        _ = self.match("if");
+        self.skipSpaces();
+
+        // Parse condition: (cond)
+        if (!self.match("(")) return error.InvalidExpression;
+        const condition = try self.parseZigCodeBalanced(1);
+        if (!self.match(")")) return error.UnmatchedBrace;
+
+        self.skipSpaces();
+
+        // Parse then branch
+        const then_branch = try self.parseBranch();
+
+        // Check for else
+        self.skipSpaces();
+        const else_branch: ?ast.Branch = if (self.match("else")) blk: {
+            self.skipSpaces();
+            break :blk try self.parseBranch();
+        } else null;
+
+        return .{
+            .condition = condition,
+            .then_branch = then_branch,
+            .else_branch = else_branch,
+        };
+    }
+
+    fn parseBranch(self: *Parser) Error!ast.Branch {
+        const c = self.peek() orelse return error.UnexpectedEof;
+
+        // Element branch: <tag>...</tag>
+        if (c == '<' and !self.check("</")) {
+            const elem = try self.allocator.create(ast.Element);
+            elem.* = try self.parseElement();
+            return .{ .element = elem };
+        }
+
+        // Component call branch: @Name(args)
+        if (c == '@') {
+            return .{ .component_call = try self.parseComponentCall() };
+        }
+
+        // Zig code branch (until else or })
+        return .{ .zig_code = try self.parseZigCodeUntilBranchEnd() };
+    }
+
+    // =========================================================================
+    // Component call: @Name(args)
+    // =========================================================================
+
+    fn parseComponentCall(self: *Parser) Error!ast.ComponentCall {
+        if (!self.match("@")) return error.UnexpectedChar;
+
+        const name = try self.parseDottedIdentifier();
+        self.skipSpaces();
+
+        if (!self.match("(")) return error.UnexpectedChar;
+        const args = try self.parseZigCodeBalanced(1);
+        if (!self.match(")")) return error.UnmatchedBrace;
+
+        return .{
+            .name = name,
+            .args = args,
+        };
+    }
+
+    /// Parse identifier with optional dots: foo, foo.bar, foo.bar.baz
+    fn parseDottedIdentifier(self: *Parser) Error![]const u8 {
+        const start = self.pos;
+        while (self.peek()) |c| {
+            if (std.ascii.isAlphanumeric(c) or c == '_' or c == '.') {
+                _ = self.advance();
+            } else {
+                break;
+            }
+        }
+        if (self.pos == start) return error.UnexpectedChar;
+        return self.source[start..self.pos];
+    }
+
+    // =========================================================================
+    // Inline for: for (iter) |cap| branch
+    // =========================================================================
+
+    fn parseForExpr(self: *Parser) Error!ast.ForExpr {
+        _ = self.match("for");
+        self.skipSpaces();
+
+        // Parse iterable: (iter)
+        if (!self.match("(")) return error.InvalidExpression;
+        const iterable = try self.parseZigCodeBalanced(1);
+        if (!self.match(")")) return error.UnmatchedBrace;
+
+        self.skipSpaces();
+
+        // Parse captures: |item| or |item, index|
+        if (!self.match("|")) return error.InvalidExpression;
+        const captures_start = self.pos;
+        while (self.peek()) |c| {
+            if (c == '|') break;
+            _ = self.advance();
+        }
+        const captures = self.source[captures_start..self.pos];
+        if (!self.match("|")) return error.InvalidExpression;
+
+        self.skipSpaces();
+
+        // Parse body branch
+        const body = try self.parseBranch();
+
+        return .{
+            .iterable = iterable,
+            .captures = captures,
+            .body = body,
+        };
+    }
+
+    // =========================================================================
+    // Block-level if: if (cond) { ... } else { ... }
+    // =========================================================================
+
+    fn parseIfStatement(self: *Parser) Error!ast.IfStatement {
+        _ = self.match("if");
+        self.skipSpaces();
+
+        // Parse condition
+        if (!self.match("(")) return error.InvalidExpression;
+        const condition = try self.parseZigCodeBalanced(1);
+        if (!self.match(")")) return error.UnmatchedBrace;
+
+        self.skipWhitespace();
+
+        // Parse then body
+        if (!self.match("{")) return error.UnexpectedChar;
+        const then_body = try self.parseNodes(.template_body);
+        self.skipWhitespace();
+        if (!self.match("}")) return error.UnmatchedBrace;
+
+        // Check for else
+        self.skipWhitespace();
+        const else_body: ?[]const ast.Node = if (self.match("else")) blk: {
+            self.skipWhitespace();
+            if (!self.match("{")) return error.UnexpectedChar;
+            const body = try self.parseNodes(.template_body);
+            self.skipWhitespace();
+            if (!self.match("}")) return error.UnmatchedBrace;
+            break :blk body;
+        } else null;
+
+        return .{
+            .condition = condition,
+            .then_body = then_body,
+            .else_body = else_body,
+        };
+    }
+
+    // =========================================================================
+    // Block-level for: for (iter) |cap| { ... }
+    // =========================================================================
+
+    fn parseForStatement(self: *Parser) Error!ast.ForStatement {
+        _ = self.match("for");
+        self.skipSpaces();
+
+        // Parse iterable
+        if (!self.match("(")) return error.InvalidExpression;
+        const iterable = try self.parseZigCodeBalanced(1);
+        if (!self.match(")")) return error.UnmatchedBrace;
+
+        self.skipSpaces();
+
+        // Parse captures
+        if (!self.match("|")) return error.InvalidExpression;
+        const captures_start = self.pos;
+        while (self.peek()) |c| {
+            if (c == '|') break;
+            _ = self.advance();
+        }
+        const captures = self.source[captures_start..self.pos];
+        if (!self.match("|")) return error.InvalidExpression;
+
+        self.skipWhitespace();
+
+        // Parse body
+        if (!self.match("{")) return error.UnexpectedChar;
+        const body = try self.parseNodes(.template_body);
+        self.skipWhitespace();
+        if (!self.match("}")) return error.UnmatchedBrace;
+
+        return .{
+            .iterable = iterable,
+            .captures = captures,
+            .body = body,
+        };
+    }
+
+    // =========================================================================
+    // Zig code parsing - balance braces, respect strings
+    // =========================================================================
+
+    /// Parse Zig code, balancing braces. Starts with `depth` open parens/braces.
+    fn parseZigCodeBalanced(self: *Parser, initial_depth: usize) Error![]const u8 {
+        const start = self.pos;
+        var paren_depth: usize = initial_depth;
+        var brace_depth: usize = 0;
+
+        while (self.peek()) |c| {
+            // Handle string literals
+            if (c == '"') {
+                try self.skipString();
+                continue;
+            }
+
+            // Handle char literals
+            if (c == '\'') {
+                try self.skipCharLiteral();
+                continue;
+            }
+
+            // Track parens
+            if (c == '(') {
+                paren_depth += 1;
+                _ = self.advance();
+                continue;
+            }
+            if (c == ')') {
+                if (paren_depth == 0) break;
+                paren_depth -= 1;
+                if (paren_depth == 0 and initial_depth > 0) break;
+                _ = self.advance();
+                continue;
+            }
+
+            // Track braces
+            if (c == '{') {
+                brace_depth += 1;
+                _ = self.advance();
+                continue;
+            }
+            if (c == '}') {
+                if (brace_depth == 0) break;
+                brace_depth -= 1;
+                _ = self.advance();
+                continue;
+            }
+
+            _ = self.advance();
+        }
+
+        return std.mem.trim(u8, self.source[start..self.pos], " \t\n\r");
+    }
+
+    /// Parse Zig code until we hit `else` or `}` at depth 0
+    fn parseZigCodeUntilBranchEnd(self: *Parser) Error![]const u8 {
+        const start = self.pos;
+        var brace_depth: usize = 0;
+        var paren_depth: usize = 0;
+
+        while (self.peek()) |c| {
+            // Handle strings
+            if (c == '"') {
+                try self.skipString();
+                continue;
+            }
+
+            // Handle char literals
+            if (c == '\'') {
+                try self.skipCharLiteral();
+                continue;
+            }
+
+            // Check for `else` keyword at depth 0
+            if (brace_depth == 0 and paren_depth == 0 and self.check("else")) {
+                break;
+            }
+
+            // Track depth
+            if (c == '(') paren_depth += 1;
+            if (c == ')') paren_depth -|= 1;
+            if (c == '{') brace_depth += 1;
+            if (c == '}') {
+                if (brace_depth == 0) break;
+                brace_depth -= 1;
+            }
+
+            _ = self.advance();
+        }
+
+        return std.mem.trim(u8, self.source[start..self.pos], " \t\n\r");
+    }
+
+    fn skipString(self: *Parser) Error!void {
+        _ = self.advance(); // opening "
+        while (self.peek()) |c| {
+            if (c == '\\') {
+                _ = self.advance();
+                _ = self.advance(); // skip escaped char
+            } else if (c == '"') {
+                _ = self.advance();
+                break;
+            } else {
+                _ = self.advance();
+            }
+        }
+    }
+
+    fn skipCharLiteral(self: *Parser) Error!void {
+        _ = self.advance(); // opening '
+        while (self.peek()) |c| {
+            if (c == '\\') {
+                _ = self.advance();
+                _ = self.advance();
+            } else if (c == '\'') {
+                _ = self.advance();
+                break;
+            } else {
+                _ = self.advance();
+            }
+        }
+    }
+
+    // =========================================================================
+    // Text and comments
+    // =========================================================================
+
+    fn parseText(self: *Parser) Error!ast.Text {
+        const start = self.pos;
+        while (self.peek()) |c| {
+            if (c == '<' or c == '{' or c == '}') break;
+            _ = self.advance();
+        }
+        // Only trim leading/trailing newlines, preserve spaces
+        var content = self.source[start..self.pos];
+        // Trim leading newlines/whitespace-only lines
+        while (content.len > 0 and (content[0] == '\n' or content[0] == '\r')) {
+            content = content[1..];
+        }
+        // Trim trailing newlines/whitespace-only lines
+        while (content.len > 0 and (content[content.len - 1] == '\n' or content[content.len - 1] == '\r')) {
+            content = content[0 .. content.len - 1];
+        }
+        // Collapse multiple spaces/tabs to single space, but keep at least one
+        return .{ .content = content };
+    }
+
+    fn skipComment(self: *Parser) Error!void {
+        if (self.match("<!--")) {
+            while (!self.check("-->")) {
+                if (self.advance() == null) return error.UnexpectedEof;
+            }
+            _ = self.match("-->");
+        } else if (self.match("<!")) {
+            // DOCTYPE or similar
+            while (self.peek() != @as(u8, '>')) {
+                if (self.advance() == null) return error.UnexpectedEof;
+            }
+            _ = self.advance();
+        }
+    }
+};
+
+// =========================================================================
+// Tests
+// =========================================================================
+
+test "parse simple template" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\pub templ hello(name: []const u8) {
+        \\    <div class="greeting">
+        \\        Hello, {name}!
+        \\    </div>
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    try std.testing.expectEqualStrings("hello", template.name);
+    try std.testing.expect(template.is_public);
+    try std.testing.expectEqual(@as(usize, 1), template.body.len);
+}
+
+test "parse inline if with elements" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test(show: bool) {
+        \\    {if (show) <span>visible</span> else <span>hidden</span>}
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    try std.testing.expectEqual(@as(usize, 1), template.body.len);
+    const expr = template.body[0].expr;
+    try std.testing.expect(expr.content == .if_expr);
+
+    const if_expr = expr.content.if_expr;
+    try std.testing.expectEqualStrings("show", if_expr.condition);
+
+    // Then branch is an element
+    try std.testing.expect(if_expr.then_branch == .element);
+    try std.testing.expectEqualStrings("span", if_expr.then_branch.element.tag);
+
+    // Else branch exists and is an element
+    try std.testing.expect(if_expr.else_branch != null);
+    try std.testing.expect(if_expr.else_branch.? == .element);
+    try std.testing.expectEqualStrings("span", if_expr.else_branch.?.element.tag);
+}
+
+test "parse inline if with zig code branches" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test(value: ?[]const u8) {
+        \\    {if (value) |v| v else "default"}
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const if_expr = template.body[0].expr.content.if_expr;
+    try std.testing.expectEqualStrings("value", if_expr.condition);
+
+    // Then branch is zig code
+    try std.testing.expect(if_expr.then_branch == .zig_code);
+    try std.testing.expectEqualStrings("|v| v", if_expr.then_branch.zig_code);
+
+    // Else branch is zig code
+    try std.testing.expect(if_expr.else_branch.? == .zig_code);
+    try std.testing.expectEqualStrings("\"default\"", if_expr.else_branch.?.zig_code);
+}
+
+test "parse inline if without else" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test(show: bool) {
+        \\    {if (show) <span>visible</span>}
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const if_expr = template.body[0].expr.content.if_expr;
+    try std.testing.expect(if_expr.then_branch == .element);
+    try std.testing.expect(if_expr.else_branch == null);
+}
+
+test "parse inline for with element" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test(items: []const []const u8) {
+        \\    {for (items) |item| <li>{item}</li>}
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    try std.testing.expectEqual(@as(usize, 1), template.body.len);
+    const expr = template.body[0].expr;
+    try std.testing.expect(expr.content == .for_expr);
+
+    const for_expr = expr.content.for_expr;
+    try std.testing.expectEqualStrings("items", for_expr.iterable);
+    try std.testing.expectEqualStrings("item", for_expr.captures);
+    try std.testing.expect(for_expr.body == .element);
+    try std.testing.expectEqualStrings("li", for_expr.body.element.tag);
+}
+
+test "parse inline for with index" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test(items: []const []const u8) {
+        \\    {for (items, 0..) |item, idx| <li>{idx}: {item}</li>}
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const for_expr = template.body[0].expr.content.for_expr;
+    try std.testing.expectEqualStrings("items, 0..", for_expr.iterable);
+    try std.testing.expectEqualStrings("item, idx", for_expr.captures);
+}
+
+test "parse block for statement" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ list(items: []const []const u8) {
+        \\    <ul>
+        \\        for (items) |item| {
+        \\            <li>{item}</li>
+        \\        }
+        \\    </ul>
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    try std.testing.expectEqual(@as(usize, 1), template.body.len);
+    const ul = template.body[0].element;
+    try std.testing.expectEqualStrings("ul", ul.tag);
+
+    // ul contains a for statement
+    try std.testing.expectEqual(@as(usize, 1), ul.children.len);
+    try std.testing.expect(ul.children[0] == .for_stmt);
+
+    const for_stmt = ul.children[0].for_stmt;
+    try std.testing.expectEqualStrings("items", for_stmt.iterable);
+    try std.testing.expectEqualStrings("item", for_stmt.captures);
+    try std.testing.expectEqual(@as(usize, 1), for_stmt.body.len);
+}
+
+test "parse block if statement" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test(show: bool) {
+        \\    if (show) {
+        \\        <div>shown</div>
+        \\    } else {
+        \\        <span>hidden</span>
+        \\    }
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    try std.testing.expectEqual(@as(usize, 1), template.body.len);
+    try std.testing.expect(template.body[0] == .if_stmt);
+
+    const if_stmt = template.body[0].if_stmt;
+    try std.testing.expectEqualStrings("show", if_stmt.condition);
+    try std.testing.expectEqual(@as(usize, 1), if_stmt.then_body.len);
+    try std.testing.expect(if_stmt.else_body != null);
+    try std.testing.expectEqual(@as(usize, 1), if_stmt.else_body.?.len);
+}
+
+test "parse nested inline expressions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test(user: User) {
+        \\    <div>
+        \\        {if (user.admin) <span class="badge">{user.role}</span>}
+        \\    </div>
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const div = template.body[0].element;
+    const if_expr = div.children[0].expr.content.if_expr;
+    const span = if_expr.then_branch.element;
+
+    try std.testing.expectEqualStrings("span", span.tag);
+    try std.testing.expectEqual(@as(usize, 1), span.attributes.len);
+    try std.testing.expectEqualStrings("class", span.attributes[0].name);
+
+    // span has a child expression
+    try std.testing.expectEqual(@as(usize, 1), span.children.len);
+    try std.testing.expect(span.children[0] == .expr);
+}
+
+test "parse self-closing element" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test() {
+        \\    <div>
+        \\        <br/>
+        \\        <input type="text" />
+        \\        <img src="foo.png"/>
+        \\    </div>
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const div = template.body[0].element;
+    try std.testing.expectEqual(@as(usize, 3), div.children.len);
+
+    const br = div.children[0].element;
+    try std.testing.expectEqualStrings("br", br.tag);
+    try std.testing.expect(br.self_closing);
+    try std.testing.expectEqual(@as(usize, 0), br.children.len);
+
+    const input = div.children[1].element;
+    try std.testing.expectEqualStrings("input", input.tag);
+    try std.testing.expect(input.self_closing);
+
+    const img = div.children[2].element;
+    try std.testing.expectEqualStrings("img", img.tag);
+    try std.testing.expect(img.self_closing);
+}
+
+test "parse single-quoted attributes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test() {
+        \\    <div class='foo' data-value='bar "baz"'></div>
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const div = template.body[0].element;
+    try std.testing.expectEqual(@as(usize, 2), div.attributes.len);
+
+    try std.testing.expectEqualStrings("class", div.attributes[0].name);
+    try std.testing.expectEqualStrings("foo", div.attributes[0].value.static);
+
+    try std.testing.expectEqualStrings("data-value", div.attributes[1].name);
+    try std.testing.expectEqualStrings("bar \"baz\"", div.attributes[1].value.static);
+}
+
+test "parse dynamic attributes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test(cls: []const u8, url: []const u8) {
+        \\    <div class={cls} data-url={url}></div>
+        \\    <a href={buildUrl(base, path)}></a>
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const div = template.body[0].element;
+    try std.testing.expectEqual(@as(usize, 2), div.attributes.len);
+
+    try std.testing.expectEqualStrings("class", div.attributes[0].name);
+    try std.testing.expect(div.attributes[0].value == .dynamic);
+    try std.testing.expectEqualStrings("cls", div.attributes[0].value.dynamic);
+
+    try std.testing.expectEqualStrings("data-url", div.attributes[1].name);
+    try std.testing.expectEqualStrings("url", div.attributes[1].value.dynamic);
+
+    const a = template.body[1].element;
+    try std.testing.expectEqualStrings("href", a.attributes[0].name);
+    try std.testing.expectEqualStrings("buildUrl(base, path)", a.attributes[0].value.dynamic);
+}
+
+test "parse boolean attributes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test() {
+        \\    <input type="checkbox" checked disabled readonly />
+        \\    <button disabled></button>
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const input = template.body[0].element;
+    try std.testing.expectEqual(@as(usize, 4), input.attributes.len);
+
+    try std.testing.expectEqualStrings("type", input.attributes[0].name);
+    try std.testing.expect(input.attributes[0].value == .static);
+
+    try std.testing.expectEqualStrings("checked", input.attributes[1].name);
+    try std.testing.expect(input.attributes[1].value == .none);
+
+    try std.testing.expectEqualStrings("disabled", input.attributes[2].name);
+    try std.testing.expect(input.attributes[2].value == .none);
+
+    try std.testing.expectEqualStrings("readonly", input.attributes[3].name);
+    try std.testing.expect(input.attributes[3].value == .none);
+
+    const button = template.body[1].element;
+    try std.testing.expectEqualStrings("disabled", button.attributes[0].name);
+    try std.testing.expect(button.attributes[0].value == .none);
+}
+
+test "parse zig code with nested braces" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test(opts: Options) {
+        \\    <div class={getClass(.{ .primary = true, .large = opts.large })}></div>
+        \\    {formatStruct(.{ .name = "test", .value = 42 })}
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const div = template.body[0].element;
+    const class_attr = div.attributes[0];
+    try std.testing.expectEqualStrings("class", class_attr.name);
+    try std.testing.expectEqualStrings("getClass(.{ .primary = true, .large = opts.large })", class_attr.value.dynamic);
+
+    const expr = template.body[1].expr;
+    try std.testing.expect(expr.content == .zig_code);
+    try std.testing.expectEqualStrings("formatStruct(.{ .name = \"test\", .value = 42 })", expr.content.zig_code);
+}
+
+test "parse zig code with strings containing braces" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test() {
+        \\    {"{"}
+        \\    {"}"}
+        \\    {"{ nested }"}
+        \\    {fmt("{s}: {d}", .{name, value})}
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    try std.testing.expectEqual(@as(usize, 4), template.body.len);
+
+    try std.testing.expectEqualStrings("\"{\"", template.body[0].expr.content.zig_code);
+    try std.testing.expectEqualStrings("\"}\"", template.body[1].expr.content.zig_code);
+    try std.testing.expectEqualStrings("\"{ nested }\"", template.body[2].expr.content.zig_code);
+    try std.testing.expectEqualStrings("fmt(\"{s}: {d}\", .{name, value})", template.body[3].expr.content.zig_code);
+}
+
+test "parse component call" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ Page(user: User) {
+        \\    <div>
+        \\        @Header()
+        \\        @UserCard(user)
+        \\        @Footer()
+        \\    </div>
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const div = template.body[0].element;
+    try std.testing.expectEqual(@as(usize, 3), div.children.len);
+
+    const header = div.children[0].component_call;
+    try std.testing.expectEqualStrings("Header", header.name);
+    try std.testing.expectEqualStrings("", header.args);
+
+    const user_card = div.children[1].component_call;
+    try std.testing.expectEqualStrings("UserCard", user_card.name);
+    try std.testing.expectEqualStrings("user", user_card.args);
+
+    const footer = div.children[2].component_call;
+    try std.testing.expectEqualStrings("Footer", footer.name);
+    try std.testing.expectEqualStrings("", footer.args);
+}
+
+test "parse component call in for loop" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ PostList(posts: []const Post) {
+        \\    for (posts) |post| {
+        \\        @PostCard(post)
+        \\    }
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const for_stmt = template.body[0].for_stmt;
+    try std.testing.expectEqual(@as(usize, 1), for_stmt.body.len);
+
+    const call = for_stmt.body[0].component_call;
+    try std.testing.expectEqualStrings("PostCard", call.name);
+    try std.testing.expectEqualStrings("post", call.args);
+}
+
+test "parse inline if with component calls" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ Badge(user: User) {
+        \\    {if (user.admin) @AdminBadge(user) else @UserBadge(user)}
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const if_expr = template.body[0].expr.content.if_expr;
+    try std.testing.expectEqualStrings("user.admin", if_expr.condition);
+
+    try std.testing.expect(if_expr.then_branch == .component_call);
+    try std.testing.expectEqualStrings("AdminBadge", if_expr.then_branch.component_call.name);
+
+    try std.testing.expect(if_expr.else_branch.? == .component_call);
+    try std.testing.expectEqualStrings("UserBadge", if_expr.else_branch.?.component_call.name);
+}
+
+test "parse file with interleaved zig functions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\const std = @import("std");
+        \\
+        \\pub fn helper(x: i32) i32 {
+        \\    return x * 2;
+        \\}
+        \\
+        \\pub templ First() {
+        \\    <div>first</div>
+        \\}
+        \\
+        \\fn privateHelper() void {}
+        \\
+        \\pub templ Second() {
+        \\    <div>second</div>
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const file = try parser.parseFile();
+
+    // Should have 2 templates
+    try std.testing.expectEqual(@as(usize, 2), file.templates.len);
+    try std.testing.expectEqualStrings("First", file.templates[0].name);
+    try std.testing.expectEqualStrings("Second", file.templates[1].name);
+
+    // Header should contain all Zig code
+    try std.testing.expect(std.mem.indexOf(u8, file.header, "const std = @import") != null);
+    try std.testing.expect(std.mem.indexOf(u8, file.header, "pub fn helper") != null);
+    try std.testing.expect(std.mem.indexOf(u8, file.header, "fn privateHelper") != null);
+}
+
+test "parse dotted component call" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ Page() {
+        \\    @components.Header()
+        \\    @ui.cards.UserCard(user)
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const header = template.body[0].component_call;
+    try std.testing.expectEqualStrings("components.Header", header.name);
+    try std.testing.expectEqualStrings("", header.args);
+
+    const user_card = template.body[1].component_call;
+    try std.testing.expectEqualStrings("ui.cards.UserCard", user_card.name);
+    try std.testing.expectEqualStrings("user", user_card.args);
+}
+
+test "parse raw expression" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test(html: []const u8) {
+        \\    <div>{!html}</div>
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const div = template.body[0].element;
+    const expr = div.children[0].expr;
+    try std.testing.expect(expr.raw);
+    try std.testing.expectEqualStrings("html", expr.content.zig_code);
+}
+
+test "parse escaped vs raw" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test(text: []const u8) {
+        \\    {text}
+        \\    {!text}
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const escaped = template.body[0].expr;
+    try std.testing.expect(!escaped.raw);
+
+    const raw = template.body[1].expr;
+    try std.testing.expect(raw.raw);
+}
