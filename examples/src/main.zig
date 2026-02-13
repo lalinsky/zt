@@ -8,12 +8,12 @@ pub fn main() !void {
     const w = &stdout.interface;
 
     // Demo the hello template
-    try templates.hello.render("World", w);
+    try templates.hello.render(.{"World"}, w);
     try w.writeAll("\n\n");
 
     // Demo the list template
     const items = [_][]const u8{ "Apple", "Banana", "Cherry" };
-    try templates.list.render(&items, w);
+    try templates.list.render(.{&items}, w);
     try w.writeAll("\n\n");
 
     // Demo the userCard template with imported type
@@ -22,7 +22,7 @@ pub fn main() !void {
         .email = "alice@example.com",
         .is_admin = true,
     };
-    try templates.userCard.render(user, w);
+    try templates.userCard.render(.{user}, w);
     try w.writeAll("\n");
 
     try w.flush();

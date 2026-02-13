@@ -36,9 +36,9 @@ pub const Generator = struct {
 
         self.indent += 1;
 
-        // Write render method
+        // _render: the actual implementation
         try self.writeIndent();
-        try self.output.writeAll("pub fn render(");
+        try self.output.writeAll("fn _render(");
         try self.output.writeAll(template.params);
         if (template.params.len > 0) {
             try self.output.writeAll(", ");
@@ -46,12 +46,26 @@ pub const Generator = struct {
         try self.output.writeAll("writer: *std.Io.Writer) std.Io.Writer.Error!void {\n");
 
         self.indent += 1;
-
-        // Generate body
         for (template.body) |node| {
             try self.generateNode(node);
         }
+        self.indent -= 1;
 
+        try self.writeIndent();
+        try self.output.writeAll("}\n\n");
+
+        // _signature: captures just the template param types
+        try self.writeIndent();
+        try self.output.writeAll("fn _signature(");
+        try self.writeAnonymizedParams(template.params);
+        try self.output.writeAll(") void {}\n\n");
+
+        // render: public API taking ArgsTuple + writer
+        try self.writeIndent();
+        try self.output.writeAll("pub fn render(args: std.meta.ArgsTuple(@TypeOf(_signature)), writer: *std.Io.Writer) std.Io.Writer.Error!void {\n");
+        self.indent += 1;
+        try self.writeIndent();
+        try self.output.writeAll("return @call(.always_inline, _render, args ++ .{writer});\n");
         self.indent -= 1;
         try self.writeIndent();
         try self.output.writeAll("}\n");
@@ -250,12 +264,11 @@ pub const Generator = struct {
         try self.writeIndent();
         try self.output.writeAll("try ");
         try self.output.writeAll(call.name);
-        try self.output.writeAll(".render(");
+        try self.output.writeAll(".render(.{");
         if (call.args.len > 0) {
             try self.output.writeAll(call.args);
-            try self.output.writeAll(", ");
         }
-        try self.output.writeAll("writer);\n");
+        try self.output.writeAll("}, writer);\n");
     }
 
     fn generateIfStmt(self: *Generator, stmt: ast.IfStatement) std.Io.Writer.Error!void {
@@ -369,6 +382,38 @@ pub const Generator = struct {
 
         try self.writeIndent();
         try self.output.writeAll("}\n");
+    }
+
+    /// Writes params with names replaced by `_`, e.g. "name: []const u8, age: u32" -> "_: []const u8, _: u32"
+    fn writeAnonymizedParams(self: *Generator, params: []const u8) std.Io.Writer.Error!void {
+        var i: usize = 0;
+        while (i < params.len) {
+            // Skip whitespace
+            while (i < params.len and params[i] == ' ') : (i += 1) {}
+            if (i >= params.len) break;
+
+            // Skip param name
+            while (i < params.len and (std.ascii.isAlphanumeric(params[i]) or params[i] == '_')) : (i += 1) {}
+
+            // Write _ instead of the name
+            try self.output.writeAll("_");
+
+            // Write `: type` until next top-level comma or end
+            var depth: usize = 0;
+            while (i < params.len) {
+                const c = params[i];
+                if (c == '(' or c == '[' or c == '{') depth += 1;
+                if (c == ')' or c == ']' or c == '}') depth -|= 1;
+                if (c == ',' and depth == 0) {
+                    try self.output.writeAll(", ");
+                    i += 1;
+                    while (i < params.len and params[i] == ' ') : (i += 1) {}
+                    break;
+                }
+                try self.output.writeByte(c);
+                i += 1;
+            }
+        }
     }
 
     fn writeIndent(self: *Generator) std.Io.Writer.Error!void {
@@ -516,8 +561,8 @@ test "generate component call" {
     try gen.generate(template);
 
     const result = output.writer.buffer[0..output.writer.end];
-    try std.testing.expect(std.mem.indexOf(u8, result, "try Header.render(writer);") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try UserCard.render(user, writer);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try Header.render(.{}, writer);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try UserCard.render(.{user}, writer);") != null);
 }
 
 test "generate dotted component call" {
@@ -541,8 +586,8 @@ test "generate dotted component call" {
     try gen.generate(template);
 
     const result = output.writer.buffer[0..output.writer.end];
-    try std.testing.expect(std.mem.indexOf(u8, result, "try components.Header.render(writer);") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try ui.UserCard.render(user, writer);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try components.Header.render(.{}, writer);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try ui.UserCard.render(.{user}, writer);") != null);
 }
 
 test "generate raw output" {
