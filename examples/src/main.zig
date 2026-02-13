@@ -33,6 +33,12 @@ pub fn main() !void {
 
     // Demo component inheritance: page wraps content in layout
     try templates.page.render(.{ "My Page", user }, w);
+    try w.writeAll("\n\n");
+
+    // Demo passing a zt.Component as a template parameter
+    const card_args: templates.userCard.Args = .{user};
+    const card = templates.userCard.bind(&card_args);
+    try templates.sidebar.render(.{ "User Info", card }, w);
     try w.writeAll("\n");
 
     try w.flush();

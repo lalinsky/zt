@@ -54,3 +54,10 @@ pub templ page(title: []const u8, user: User) {
         }
     }
 }
+
+pub templ sidebar(title: []const u8, content: zt.Component) {
+    <aside>
+        <h3>{title}</h3>
+        @content
+    </aside>
+}

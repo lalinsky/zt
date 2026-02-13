@@ -430,17 +430,10 @@ pub const Generator = struct {
     }
 
     fn generateComponentCall(self: *Generator, call: ast.ComponentCall) std.Io.Writer.Error!void {
-        // Special case: @children renders the implicit children param
-        if (std.mem.eql(u8, call.name, "children")) {
-            try self.writeIndent();
-            try self.output.writeAll("try children.render(writer);\n");
-            return;
-        }
-
         try self.writeIndent();
-        try self.output.writeAll("try ");
+        try self.output.writeAll("try zt.renderComponent(");
         try self.output.writeAll(call.name);
-        try self.output.writeAll(".render(.{");
+        try self.output.writeAll(", .{");
         if (call.args.len > 0) {
             try self.output.writeAll(call.args);
         }
@@ -850,8 +843,8 @@ test "generate component call" {
     try gen.generate(template);
 
     const result = output.writer.buffer[0..output.writer.end];
-    try std.testing.expect(std.mem.indexOf(u8, result, "try Header.render(.{}, writer);") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try UserCard.render(.{user}, writer);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.renderComponent(Header, .{}, writer);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.renderComponent(UserCard, .{user}, writer);") != null);
 }
 
 test "generate dotted component call" {
@@ -875,8 +868,8 @@ test "generate dotted component call" {
     try gen.generate(template);
 
     const result = output.writer.buffer[0..output.writer.end];
-    try std.testing.expect(std.mem.indexOf(u8, result, "try components.Header.render(.{}, writer);") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try ui.UserCard.render(.{user}, writer);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.renderComponent(components.Header, .{}, writer);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.renderComponent(ui.UserCard, .{user}, writer);") != null);
 }
 
 test "generate raw output" {

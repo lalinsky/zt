@@ -10,6 +10,19 @@ pub const Component = struct {
     }
 };
 
+/// Renders a component call target. Accepts either a template struct type
+/// (dispatches to Type.render(args, writer)) or a zt.Component value
+/// (dispatches to value.render(writer), ignoring args).
+pub inline fn renderComponent(target: anytype, args: anytype, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+    if (@TypeOf(target) == type) {
+        return target.render(args, writer);
+    } else if (@TypeOf(target) == Component) {
+        return target.render(writer);
+    } else {
+        @compileError("expected a template type or zt.Component");
+    }
+}
+
 /// Writes a value to the writer, escaping HTML special characters.
 /// If the value has a `formatHtml` method, it's called directly (assumed safe).
 pub fn writeEscaped(writer: *std.Io.Writer, value: anytype) std.Io.Writer.Error!void {
