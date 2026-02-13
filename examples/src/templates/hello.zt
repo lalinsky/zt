@@ -37,9 +37,20 @@ pub templ layout(title: []const u8) {
     </html>
 }
 
+pub templ section(title: []const u8) {
+    <section>
+        <h2>{title}</h2>
+        @children
+    </section>
+}
+
 pub templ page(title: []const u8, user: User) {
     @layout(title) {
-        <h1>Welcome, {user.name}!</h1>
-        <p>{user.email}</p>
+        @section("Profile") {
+            <p>{user.name}</p>
+        }
+        @section("Contact") {
+            <p>{user.email}</p>
+        }
     }
 }

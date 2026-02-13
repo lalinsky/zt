@@ -32,6 +32,7 @@ pub const Generator = struct {
 
         // Phase 1: Generate inner structs for component calls with children
         if (num_children_calls > 0) {
+            self.children_call_index = 0;
             try self.generateInnerStructs(template.name, template.params, template.body);
         }
 
@@ -186,9 +187,21 @@ pub const Generator = struct {
         const index = self.children_call_index;
         self.children_call_index += 1;
 
+        // Build this inner struct's name for recursive use
+        var name_buf: [256]u8 = undefined;
+        const name = std.fmt.bufPrint(&name_buf, "{s}__children_{d}", .{ parent_name, index }) catch "??";
+
+        // Recursively handle nested children calls
+        const num_children_calls = countChildrenCalls(body);
+        if (num_children_calls > 0) {
+            const saved_index = self.children_call_index;
+            self.children_call_index = 0;
+            try self.generateInnerStructs(name, params, body);
+            self.children_call_index = saved_index;
+        }
+
         try self.output.writeAll("const ");
-        try self.output.writeAll(parent_name);
-        try self.writeChildrenStructSuffix(index);
+        try self.output.writeAll(name);
         try self.output.writeAll(" = struct {\n");
 
         self.indent += 1;
@@ -197,13 +210,22 @@ pub const Generator = struct {
         try self.writeIndent();
         try self.output.writeAll("fn _render(");
         try self.output.writeAll(params);
-        if (params.len > 0) try self.output.writeAll(", ");
+        // Hidden params for nested children calls
+        for (0..num_children_calls) |i| {
+            try self.output.writeAll(", ");
+            try self.writeChildrenParamName(i);
+            try self.output.writeAll(": zt.Component");
+        }
+        if (params.len > 0 or num_children_calls > 0) try self.output.writeAll(", ");
         try self.output.writeAll("writer: *std.Io.Writer) std.Io.Writer.Error!void {\n");
         self.indent += 1;
         if (params.len > 0) try self.writeParamDiscards(params);
+        const saved_index = self.children_call_index;
+        self.children_call_index = 0;
         for (body) |node| {
             try self.generateNode(node);
         }
+        self.children_call_index = saved_index;
         self.indent -= 1;
         try self.writeIndent();
         try self.output.writeAll("}\n\n");
@@ -214,8 +236,8 @@ pub const Generator = struct {
         try self.writeAnonymizedParams(params);
         try self.output.writeAll(") void {}\n\n");
 
-        // Args, render, bind (no children calls in inner struct for now)
-        try self.writeArgsRenderBind(parent_name, 0);
+        // Args, render, bind
+        try self.writeArgsRenderBind(name, num_children_calls);
 
         self.indent -= 1;
         try self.output.writeAll("};\n\n");
