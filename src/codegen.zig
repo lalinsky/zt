@@ -26,13 +26,19 @@ pub const Generator = struct {
     }
 
     pub fn generate(self: *Generator, template: ast.Template) std.Io.Writer.Error!void {
-        // Write function signature
+        // Write struct wrapper
         if (template.is_public) {
             try self.output.writeAll("pub ");
         }
-        try self.output.writeAll("fn ");
+        try self.output.writeAll("const ");
         try self.output.writeAll(template.name);
-        try self.output.writeAll("(");
+        try self.output.writeAll(" = struct {\n");
+
+        self.indent += 1;
+
+        // Write render method
+        try self.writeIndent();
+        try self.output.writeAll("pub fn render(");
         try self.output.writeAll(template.params);
         if (template.params.len > 0) {
             try self.output.writeAll(", ");
@@ -47,7 +53,11 @@ pub const Generator = struct {
         }
 
         self.indent -= 1;
+        try self.writeIndent();
         try self.output.writeAll("}\n");
+
+        self.indent -= 1;
+        try self.output.writeAll("};\n");
     }
 
     fn generateNode(self: *Generator, node: ast.Node) std.Io.Writer.Error!void {
@@ -240,7 +250,7 @@ pub const Generator = struct {
         try self.writeIndent();
         try self.output.writeAll("try ");
         try self.output.writeAll(call.name);
-        try self.output.writeAll("(");
+        try self.output.writeAll(".render(");
         if (call.args.len > 0) {
             try self.output.writeAll(call.args);
             try self.output.writeAll(", ");
@@ -405,7 +415,7 @@ test "generate simple template" {
     try gen.generate(template);
 
     const result = output.writer.buffer[0..output.writer.end];
-    try std.testing.expect(std.mem.indexOf(u8, result, "pub fn hello") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "pub const hello") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "<div class=\\\"greeting\\\">") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "</div>") != null);
 }
@@ -506,8 +516,8 @@ test "generate component call" {
     try gen.generate(template);
 
     const result = output.writer.buffer[0..output.writer.end];
-    try std.testing.expect(std.mem.indexOf(u8, result, "try Header(writer);") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try UserCard(user, writer);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try Header.render(writer);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try UserCard.render(user, writer);") != null);
 }
 
 test "generate dotted component call" {
@@ -531,8 +541,8 @@ test "generate dotted component call" {
     try gen.generate(template);
 
     const result = output.writer.buffer[0..output.writer.end];
-    try std.testing.expect(std.mem.indexOf(u8, result, "try components.Header(writer);") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try ui.UserCard(user, writer);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try components.Header.render(writer);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try ui.UserCard.render(user, writer);") != null);
 }
 
 test "generate raw output" {
