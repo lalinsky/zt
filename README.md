@@ -123,6 +123,50 @@ pub templ Page() {
 }
 ```
 
+### Component Inheritance
+
+Templates can pass children to other templates using `@children`:
+
+```zig
+// Parent template: uses @children to render nested content
+pub templ Layout(title: []const u8) {
+    <html>
+        <head><title>{title}</title></head>
+        <body>@children</body>
+    </html>
+}
+
+// Child template: wraps content inside a parent
+pub templ Page(title: []const u8, user: User) {
+    @Layout(title) {
+        <h1>Welcome, {user.name}!</h1>
+        <p>{user.email}</p>
+    }
+}
+```
+
+Nesting works to any depth:
+
+```zig
+pub templ Section(title: []const u8) {
+    <section>
+        <h2>{title}</h2>
+        @children
+    </section>
+}
+
+pub templ Page(user: User) {
+    @Layout("Home") {
+        @Section("Profile") {
+            <p>{user.name}</p>
+        }
+        @Section("Contact") {
+            <p>{user.email}</p>
+        }
+    }
+}
+```
+
 ### Zig Functions
 
 You can define regular Zig functions alongside templates:
@@ -153,7 +197,7 @@ pub fn build(b: *std.Build) void {
     });
 
     // Compile templates
-    const templates = zt.addTemplates(b, zt_dep, &.{
+    const templates = zt.addTemplates(b, &.{
         "src/templates/Page.zt",
         "src/templates/UserCard.zt",
     });
@@ -169,8 +213,8 @@ pub fn build(b: *std.Build) void {
 ```zig
 const templates = @import("templates/Page.zig");
 
-pub fn handleRequest(writer: anytype) !void {
+pub fn handleRequest(writer: *std.Io.Writer) !void {
     const user = getUser();
-    try templates.Page(user, writer);
+    try templates.Page.render(.{user}, writer);
 }
 ```
