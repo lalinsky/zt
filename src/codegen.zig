@@ -4,6 +4,7 @@ const ast = @import("ast.zig");
 pub const Generator = struct {
     output: *std.Io.Writer,
     indent: usize,
+    children_call_index: usize = 0,
 
     pub fn init(output: *std.Io.Writer) Generator {
         return .{
@@ -26,7 +27,15 @@ pub const Generator = struct {
     }
 
     pub fn generate(self: *Generator, template: ast.Template) std.Io.Writer.Error!void {
-        // Write struct wrapper
+        const has_children_param = bodyUsesChildren(template.body);
+        const num_children_calls = countChildrenCalls(template.body);
+
+        // Phase 1: Generate inner structs for component calls with children
+        if (num_children_calls > 0) {
+            try self.generateInnerStructs(template.name, template.params, template.body);
+        }
+
+        // Phase 2: Generate the main struct
         if (template.is_public) {
             try self.output.writeAll("pub ");
         }
@@ -40,12 +49,25 @@ pub const Generator = struct {
         try self.writeIndent();
         try self.output.writeAll("fn _render(");
         try self.output.writeAll(template.params);
-        if (template.params.len > 0) {
+        // Implicit children param if template uses @children
+        if (has_children_param) {
+            if (template.params.len > 0) try self.output.writeAll(", ");
+            try self.output.writeAll("children: zt.Component");
+        }
+        // Hidden params for component calls with children
+        for (0..num_children_calls) |i| {
+            if (template.params.len > 0 or has_children_param or i > 0) try self.output.writeAll(", ");
+            try self.writeChildrenParamName(i);
+            try self.output.writeAll(": zt.Component");
+        }
+        if (template.params.len > 0 or has_children_param or num_children_calls > 0) {
             try self.output.writeAll(", ");
         }
         try self.output.writeAll("writer: *std.Io.Writer) std.Io.Writer.Error!void {\n");
 
         self.indent += 1;
+        if (template.params.len > 0) try self.writeParamDiscards(template.params);
+        self.children_call_index = 0;
         for (template.body) |node| {
             try self.generateNode(node);
         }
@@ -54,27 +76,55 @@ pub const Generator = struct {
         try self.writeIndent();
         try self.output.writeAll("}\n\n");
 
-        // _signature: captures just the template param types
+        // _signature: captures template param types (+ children if used)
         try self.writeIndent();
         try self.output.writeAll("fn _signature(");
         try self.writeAnonymizedParams(template.params);
+        if (has_children_param) {
+            if (template.params.len > 0) try self.output.writeAll(", ");
+            try self.output.writeAll("_: zt.Component");
+        }
         try self.output.writeAll(") void {}\n\n");
 
-        // Args: public type alias for the args tuple
+        // Args, render, bind
+        try self.writeArgsRenderBind(template.name, num_children_calls);
+
+        self.indent -= 1;
+        try self.output.writeAll("};\n");
+    }
+
+    /// Generate the Args type, render function, and bind function.
+    fn writeArgsRenderBind(self: *Generator, template_name: []const u8, num_children_calls: usize) std.Io.Writer.Error!void {
+        // Args
         try self.writeIndent();
         try self.output.writeAll("pub const Args = std.meta.ArgsTuple(@TypeOf(_signature));\n\n");
 
-        // render: public API taking Args + writer
+        // render
         try self.writeIndent();
         try self.output.writeAll("pub fn render(args: Args, writer: *std.Io.Writer) std.Io.Writer.Error!void {\n");
         self.indent += 1;
+        // Bind inner structs
+        for (0..num_children_calls) |i| {
+            try self.writeIndent();
+            try self.output.writeAll("const ");
+            try self.writeChildrenParamName(i);
+            try self.output.writeAll(" = ");
+            try self.output.writeAll(template_name);
+            try self.writeChildrenStructSuffix(i);
+            try self.output.writeAll(".bind(&args);\n");
+        }
         try self.writeIndent();
-        try self.output.writeAll("return @call(.always_inline, _render, args ++ .{writer});\n");
+        try self.output.writeAll("return @call(.always_inline, _render, args ++ .{");
+        for (0..num_children_calls) |i| {
+            try self.writeChildrenParamName(i);
+            try self.output.writeAll(", ");
+        }
+        try self.output.writeAll("writer});\n");
         self.indent -= 1;
         try self.writeIndent();
         try self.output.writeAll("}\n\n");
 
-        // bind: type-erase args + this template into a Component
+        // bind
         try self.writeIndent();
         try self.output.writeAll("pub fn bind(args: *const Args) zt.Component {\n");
         self.indent += 1;
@@ -103,9 +153,72 @@ pub const Generator = struct {
         self.indent -= 1;
         try self.writeIndent();
         try self.output.writeAll("}\n");
+    }
+
+    /// Generate inner structs for all component calls with children in the body.
+    fn generateInnerStructs(self: *Generator, parent_name: []const u8, params: []const u8, nodes: []const ast.Node) std.Io.Writer.Error!void {
+        for (nodes) |node| {
+            switch (node) {
+                .component_call => |call| {
+                    if (call.children.len > 0) {
+                        try self.generateOneInnerStruct(parent_name, params, call.children);
+                    }
+                },
+                .element => |elem| try self.generateInnerStructs(parent_name, params, elem.children),
+                .if_stmt => |stmt| {
+                    try self.generateInnerStructs(parent_name, params, stmt.then_body);
+                    if (stmt.else_body) |eb| try self.generateInnerStructs(parent_name, params, eb);
+                },
+                .for_stmt => |stmt| try self.generateInnerStructs(parent_name, params, stmt.body),
+                .switch_stmt => |stmt| {
+                    for (stmt.cases) |case| switch (case.body) {
+                        .nodes => |case_nodes| try self.generateInnerStructs(parent_name, params, case_nodes),
+                        .branch => {},
+                    };
+                },
+                else => {},
+            }
+        }
+    }
+
+    /// Generate a single inner struct for a children block.
+    fn generateOneInnerStruct(self: *Generator, parent_name: []const u8, params: []const u8, body: []const ast.Node) std.Io.Writer.Error!void {
+        const index = self.children_call_index;
+        self.children_call_index += 1;
+
+        try self.output.writeAll("const ");
+        try self.output.writeAll(parent_name);
+        try self.writeChildrenStructSuffix(index);
+        try self.output.writeAll(" = struct {\n");
+
+        self.indent += 1;
+
+        // _render
+        try self.writeIndent();
+        try self.output.writeAll("fn _render(");
+        try self.output.writeAll(params);
+        if (params.len > 0) try self.output.writeAll(", ");
+        try self.output.writeAll("writer: *std.Io.Writer) std.Io.Writer.Error!void {\n");
+        self.indent += 1;
+        if (params.len > 0) try self.writeParamDiscards(params);
+        for (body) |node| {
+            try self.generateNode(node);
+        }
+        self.indent -= 1;
+        try self.writeIndent();
+        try self.output.writeAll("}\n\n");
+
+        // _signature
+        try self.writeIndent();
+        try self.output.writeAll("fn _signature(");
+        try self.writeAnonymizedParams(params);
+        try self.output.writeAll(") void {}\n\n");
+
+        // Args, render, bind (no children calls in inner struct for now)
+        try self.writeArgsRenderBind(parent_name, 0);
 
         self.indent -= 1;
-        try self.output.writeAll("};\n");
+        try self.output.writeAll("};\n\n");
     }
 
     fn generateNode(self: *Generator, node: ast.Node) std.Io.Writer.Error!void {
@@ -295,12 +408,25 @@ pub const Generator = struct {
     }
 
     fn generateComponentCall(self: *Generator, call: ast.ComponentCall) std.Io.Writer.Error!void {
+        // Special case: @children renders the implicit children param
+        if (std.mem.eql(u8, call.name, "children")) {
+            try self.writeIndent();
+            try self.output.writeAll("try children.render(writer);\n");
+            return;
+        }
+
         try self.writeIndent();
         try self.output.writeAll("try ");
         try self.output.writeAll(call.name);
         try self.output.writeAll(".render(.{");
         if (call.args.len > 0) {
             try self.output.writeAll(call.args);
+        }
+        // Pass the bound children component if this call has children
+        if (call.children.len > 0) {
+            if (call.args.len > 0) try self.output.writeAll(", ");
+            try self.writeChildrenParamName(self.children_call_index);
+            self.children_call_index += 1;
         }
         try self.output.writeAll("}, writer);\n");
     }
@@ -416,6 +542,113 @@ pub const Generator = struct {
 
         try self.writeIndent();
         try self.output.writeAll("}\n");
+    }
+
+    fn writeChildrenParamName(self: *Generator, index: usize) std.Io.Writer.Error!void {
+        try self.output.writeAll("__children_");
+        try self.output.writeByte('0' + @as(u8, @intCast(index)));
+    }
+
+    fn writeChildrenStructSuffix(self: *Generator, index: usize) std.Io.Writer.Error!void {
+        try self.output.writeAll("__children_");
+        try self.output.writeByte('0' + @as(u8, @intCast(index)));
+    }
+
+    /// Check if a body uses @children (needs implicit children param).
+    fn bodyUsesChildren(nodes: []const ast.Node) bool {
+        for (nodes) |node| {
+            switch (node) {
+                .component_call => |call| {
+                    if (std.mem.eql(u8, call.name, "children")) return true;
+                },
+                .element => |elem| {
+                    if (bodyUsesChildren(elem.children)) return true;
+                },
+                .if_stmt => |stmt| {
+                    if (bodyUsesChildren(stmt.then_body)) return true;
+                    if (stmt.else_body) |eb| {
+                        if (bodyUsesChildren(eb)) return true;
+                    }
+                },
+                .for_stmt => |stmt| {
+                    if (bodyUsesChildren(stmt.body)) return true;
+                },
+                .switch_stmt => |stmt| {
+                    for (stmt.cases) |case| switch (case.body) {
+                        .nodes => |case_nodes| {
+                            if (bodyUsesChildren(case_nodes)) return true;
+                        },
+                        .branch => |branch| switch (branch) {
+                            .component_call => |cc| {
+                                if (std.mem.eql(u8, cc.name, "children")) return true;
+                            },
+                            else => {},
+                        },
+                    };
+                },
+                else => {},
+            }
+        }
+        return false;
+    }
+
+    /// Count component calls with children blocks in a body tree.
+    fn countChildrenCalls(nodes: []const ast.Node) usize {
+        var count: usize = 0;
+        for (nodes) |node| {
+            switch (node) {
+                .component_call => |call| {
+                    if (call.children.len > 0) count += 1;
+                },
+                .element => |elem| count += countChildrenCalls(elem.children),
+                .if_stmt => |stmt| {
+                    count += countChildrenCalls(stmt.then_body);
+                    if (stmt.else_body) |eb| count += countChildrenCalls(eb);
+                },
+                .for_stmt => |stmt| count += countChildrenCalls(stmt.body),
+                .switch_stmt => |stmt| {
+                    for (stmt.cases) |case| switch (case.body) {
+                        .nodes => |case_nodes| count += countChildrenCalls(case_nodes),
+                        .branch => {},
+                    };
+                },
+                else => {},
+            }
+        }
+        return count;
+    }
+
+    /// Write `_ = &name;` for each param to suppress unused parameter errors.
+    fn writeParamDiscards(self: *Generator, params: []const u8) std.Io.Writer.Error!void {
+        var i: usize = 0;
+        while (i < params.len) {
+            while (i < params.len and params[i] == ' ') : (i += 1) {}
+            if (i >= params.len) break;
+
+            const name_start = i;
+            while (i < params.len and (std.ascii.isAlphanumeric(params[i]) or params[i] == '_')) : (i += 1) {}
+            const name = params[name_start..i];
+            if (name.len == 0) break;
+
+            try self.writeIndent();
+            try self.output.writeAll("_ = &");
+            try self.output.writeAll(name);
+            try self.output.writeAll(";\n");
+
+            // Skip to next param (past `: type,`)
+            var depth: usize = 0;
+            while (i < params.len) {
+                const c = params[i];
+                if (c == '(' or c == '[' or c == '{') depth += 1;
+                if (c == ')' or c == ']' or c == '}') depth -|= 1;
+                if (c == ',' and depth == 0) {
+                    i += 1;
+                    while (i < params.len and params[i] == ' ') : (i += 1) {}
+                    break;
+                }
+                i += 1;
+            }
+        }
     }
 
     /// Writes params with names replaced by `_`, e.g. "name: []const u8, age: u32" -> "_: []const u8, _: u32"

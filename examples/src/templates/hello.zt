@@ -29,3 +29,17 @@ pub templ userList(users: []const User) {
         }
     </div>
 }
+
+pub templ layout(title: []const u8) {
+    <html>
+        <head><title>{title}</title></head>
+        <body>@children</body>
+    </html>
+}
+
+pub templ page(title: []const u8, user: User) {
+    @layout(title) {
+        <h1>Welcome, {user.name}!</h1>
+        <p>{user.email}</p>
+    }
+}

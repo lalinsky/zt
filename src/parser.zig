@@ -552,13 +552,27 @@ pub const Parser = struct {
         const name = try self.parseDottedIdentifier();
         self.skipSpaces();
 
-        if (!self.match("(")) return self.fail("expected '(' after component name", .{});
-        const args = try self.parseZigCodeBalanced(1);
-        if (!self.match(")")) return self.fail("expected ')' after component arguments", .{});
+        // Args are optional (e.g. @children has no parens)
+        var args: []const u8 = "";
+        if (self.match("(")) {
+            args = try self.parseZigCodeBalanced(1);
+            if (!self.match(")")) return self.fail("expected ')' after component arguments", .{});
+        }
+
+        // Optional children block: @Name(args) { ... }
+        self.skipWhitespace();
+        var children: []const ast.Node = &.{};
+        if (self.pos < self.source.len and self.source[self.pos] == '{') {
+            self.pos += 1; // skip {
+            children = try self.parseNodes(.template_body);
+            self.skipWhitespace();
+            if (!self.match("}")) return self.fail("expected '}}' to close component children block", .{});
+        }
 
         return .{
             .name = name,
             .args = args,
+            .children = children,
         };
     }
 

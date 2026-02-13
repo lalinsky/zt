@@ -29,6 +29,10 @@ pub fn main() !void {
     const args: templates.hello.Args = .{"World"};
     const component = templates.hello.bind(&args);
     try component.render(w);
+    try w.writeAll("\n\n");
+
+    // Demo component inheritance: page wraps content in layout
+    try templates.page.render(.{ "My Page", user }, w);
     try w.writeAll("\n");
 
     try w.flush();

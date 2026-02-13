@@ -81,10 +81,11 @@ pub const Branch = union(enum) {
     zig_code: []const u8,
 };
 
-/// Component call: @Name(args)
+/// Component call: @Name(args) or @Name(args) { children }
 pub const ComponentCall = struct {
     name: []const u8,
     args: []const u8,
+    children: []const Node = &.{},
 };
 
 /// Block-level: if (cond) { ... } else { ... }
