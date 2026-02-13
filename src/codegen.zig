@@ -60,12 +60,46 @@ pub const Generator = struct {
         try self.writeAnonymizedParams(template.params);
         try self.output.writeAll(") void {}\n\n");
 
-        // render: public API taking ArgsTuple + writer
+        // Args: public type alias for the args tuple
         try self.writeIndent();
-        try self.output.writeAll("pub fn render(args: std.meta.ArgsTuple(@TypeOf(_signature)), writer: *std.Io.Writer) std.Io.Writer.Error!void {\n");
+        try self.output.writeAll("pub const Args = std.meta.ArgsTuple(@TypeOf(_signature));\n\n");
+
+        // render: public API taking Args + writer
+        try self.writeIndent();
+        try self.output.writeAll("pub fn render(args: Args, writer: *std.Io.Writer) std.Io.Writer.Error!void {\n");
         self.indent += 1;
         try self.writeIndent();
         try self.output.writeAll("return @call(.always_inline, _render, args ++ .{writer});\n");
+        self.indent -= 1;
+        try self.writeIndent();
+        try self.output.writeAll("}\n\n");
+
+        // bind: type-erase args + this template into a Component
+        try self.writeIndent();
+        try self.output.writeAll("pub fn bind(args: *const Args) zt.Component {\n");
+        self.indent += 1;
+        try self.writeIndent();
+        try self.output.writeAll("return .{\n");
+        self.indent += 1;
+        try self.writeIndent();
+        try self.output.writeAll(".ptr = @ptrCast(args),\n");
+        try self.writeIndent();
+        try self.output.writeAll(".renderFn = struct {\n");
+        self.indent += 1;
+        try self.writeIndent();
+        try self.output.writeAll("fn f(ptr: *const anyopaque, writer: *std.Io.Writer) std.Io.Writer.Error!void {\n");
+        self.indent += 1;
+        try self.writeIndent();
+        try self.output.writeAll("return render(@as(*const Args, @ptrCast(@alignCast(ptr))).*, writer);\n");
+        self.indent -= 1;
+        try self.writeIndent();
+        try self.output.writeAll("}\n");
+        self.indent -= 1;
+        try self.writeIndent();
+        try self.output.writeAll("}.f,\n");
+        self.indent -= 1;
+        try self.writeIndent();
+        try self.output.writeAll("};\n");
         self.indent -= 1;
         try self.writeIndent();
         try self.output.writeAll("}\n");

@@ -23,6 +23,12 @@ pub fn main() !void {
         .is_admin = true,
     };
     try templates.userCard.render(.{user}, w);
+    try w.writeAll("\n\n");
+
+    // Demo bind: type-erase a template + args into a Component
+    const args: templates.hello.Args = .{"World"};
+    const component = templates.hello.bind(&args);
+    try component.render(w);
     try w.writeAll("\n");
 
     try w.flush();

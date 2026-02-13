@@ -2,7 +2,8 @@ pub const ast = @import("ast.zig");
 pub const Parser = @import("parser.zig").Parser;
 pub const Generator = @import("codegen.zig").Generator;
 
-// Runtime functions for generated code
+// Runtime types and functions for generated code
+pub const Component = @import("runtime.zig").Component;
 pub const writeEscaped = @import("runtime.zig").writeEscaped;
 pub const writeRaw = @import("runtime.zig").writeRaw;
 pub const writeAttr = @import("runtime.zig").writeAttr;

@@ -1,5 +1,15 @@
 const std = @import("std");
 
+/// A type-erased renderable component.
+pub const Component = struct {
+    ptr: *const anyopaque,
+    renderFn: *const fn (*const anyopaque, *std.Io.Writer) std.Io.Writer.Error!void,
+
+    pub fn render(self: Component, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        return self.renderFn(self.ptr, writer);
+    }
+};
+
 /// Writes a value to the writer, escaping HTML special characters.
 /// If the value has a `formatHtml` method, it's called directly (assumed safe).
 pub fn writeEscaped(writer: *std.Io.Writer, value: anytype) std.Io.Writer.Error!void {
