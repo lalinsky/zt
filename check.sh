@@ -67,4 +67,14 @@ if [ "$VERBOSE" = true ]; then
 fi
 eval zig build $BUILD_ARGS --summary all
 
+echo "=== Checking example output ==="
+cd examples
+zig build run > output.actual.txt 2>&1
+if ! diff -u output.txt output.actual.txt; then
+    echo "Example output mismatch!"
+    exit 1
+fi
+rm -f output.actual.txt
+cd ..
+
 echo "=== All checks passed! ==="

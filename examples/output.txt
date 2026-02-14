@@ -1,0 +1,17 @@
+=== hello ===
+<div class="greeting"><h1>Hello, World!</h1></div>
+
+=== list ===
+<ul><li>Apple</li><li>Banana</li><li>Cherry</li></ul>
+
+=== userCard ===
+<div class="user-card"><h2>Alice</h2><p>alice@example.com</p><span class="badge">Admin</span></div>
+
+=== bind ===
+<div class="greeting"><h1>Hello, World!</h1></div>
+
+=== page (inheritance) ===
+<html><head><title>My Page</title></head><body><section><h2>Profile</h2><p>Alice</p></section><section><h2>Contact</h2><p>alice@example.com</p></section></body></html>
+
+=== sidebar (component param) ===
+<aside><h3>User Info</h3><div class="user-card"><h2>Alice</h2><p>alice@example.com</p><span class="badge">Admin</span></div></aside>
