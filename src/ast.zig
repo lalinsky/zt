@@ -7,9 +7,14 @@ pub const TemplateFile = struct {
     templates: []const Template,
 };
 
+pub const Parameter = struct {
+    name: []const u8,
+    type_str: []const u8,
+};
+
 pub const Template = struct {
     name: []const u8,
-    params: []const u8, // Raw Zig parameter list
+    params: []const Parameter,
     is_public: bool,
     body: []const Node,
 };

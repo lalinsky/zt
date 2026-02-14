@@ -49,7 +49,7 @@ pub const Generator = struct {
         // _render: the actual implementation
         try self.writeIndent();
         try self.output.writeAll("fn _render(");
-        try self.output.writeAll(template.params);
+        try self.writeParams(template.params);
         // Implicit children param if template uses @children
         if (has_children_param) {
             if (template.params.len > 0) try self.output.writeAll(", ");
@@ -157,7 +157,7 @@ pub const Generator = struct {
     }
 
     /// Generate inner structs for all component calls with children in the body.
-    fn generateInnerStructs(self: *Generator, parent_name: []const u8, params: []const u8, nodes: []const ast.Node) std.Io.Writer.Error!void {
+    fn generateInnerStructs(self: *Generator, parent_name: []const u8, params: []const ast.Parameter, nodes: []const ast.Node) std.Io.Writer.Error!void {
         for (nodes) |node| {
             switch (node) {
                 .component_call => |call| {
@@ -183,7 +183,7 @@ pub const Generator = struct {
     }
 
     /// Generate a single inner struct for a children block.
-    fn generateOneInnerStruct(self: *Generator, parent_name: []const u8, params: []const u8, body: []const ast.Node) std.Io.Writer.Error!void {
+    fn generateOneInnerStruct(self: *Generator, parent_name: []const u8, params: []const ast.Parameter, body: []const ast.Node) std.Io.Writer.Error!void {
         const index = self.children_call_index;
         self.children_call_index += 1;
 
@@ -209,7 +209,7 @@ pub const Generator = struct {
         // _render
         try self.writeIndent();
         try self.output.writeAll("fn _render(");
-        try self.output.writeAll(params);
+        try self.writeParams(params);
         // Hidden params for nested children calls
         for (0..num_children_calls) |i| {
             try self.output.writeAll(", ");
@@ -634,67 +634,31 @@ pub const Generator = struct {
     }
 
     /// Write `_ = &name;` for each param to suppress unused parameter errors.
-    fn writeParamDiscards(self: *Generator, params: []const u8) std.Io.Writer.Error!void {
-        var i: usize = 0;
-        while (i < params.len) {
-            while (i < params.len and params[i] == ' ') : (i += 1) {}
-            if (i >= params.len) break;
-
-            const name_start = i;
-            while (i < params.len and (std.ascii.isAlphanumeric(params[i]) or params[i] == '_')) : (i += 1) {}
-            const name = params[name_start..i];
-            if (name.len == 0) break;
-
+    fn writeParamDiscards(self: *Generator, params: []const ast.Parameter) std.Io.Writer.Error!void {
+        for (params) |p| {
             try self.writeIndent();
             try self.output.writeAll("_ = &");
-            try self.output.writeAll(name);
+            try self.output.writeAll(p.name);
             try self.output.writeAll(";\n");
-
-            // Skip to next param (past `: type,`)
-            var depth: usize = 0;
-            while (i < params.len) {
-                const c = params[i];
-                if (c == '(' or c == '[' or c == '{') depth += 1;
-                if (c == ')' or c == ']' or c == '}') depth -|= 1;
-                if (c == ',' and depth == 0) {
-                    i += 1;
-                    while (i < params.len and params[i] == ' ') : (i += 1) {}
-                    break;
-                }
-                i += 1;
-            }
         }
     }
 
     /// Writes params with names replaced by `_`, e.g. "name: []const u8, age: u32" -> "_: []const u8, _: u32"
-    fn writeAnonymizedParams(self: *Generator, params: []const u8) std.Io.Writer.Error!void {
-        var i: usize = 0;
-        while (i < params.len) {
-            // Skip whitespace
-            while (i < params.len and params[i] == ' ') : (i += 1) {}
-            if (i >= params.len) break;
+    fn writeAnonymizedParams(self: *Generator, params: []const ast.Parameter) std.Io.Writer.Error!void {
+        for (params, 0..) |p, i| {
+            if (i > 0) try self.output.writeAll(", ");
+            try self.output.writeAll("_: ");
+            try self.output.writeAll(p.type_str);
+        }
+    }
 
-            // Skip param name
-            while (i < params.len and (std.ascii.isAlphanumeric(params[i]) or params[i] == '_')) : (i += 1) {}
-
-            // Write _ instead of the name
-            try self.output.writeAll("_");
-
-            // Write `: type` until next top-level comma or end
-            var depth: usize = 0;
-            while (i < params.len) {
-                const c = params[i];
-                if (c == '(' or c == '[' or c == '{') depth += 1;
-                if (c == ')' or c == ']' or c == '}') depth -|= 1;
-                if (c == ',' and depth == 0) {
-                    try self.output.writeAll(", ");
-                    i += 1;
-                    while (i < params.len and params[i] == ' ') : (i += 1) {}
-                    break;
-                }
-                try self.output.writeByte(c);
-                i += 1;
-            }
+    /// Writes full parameter list: "name: Type, other: OtherType"
+    fn writeParams(self: *Generator, params: []const ast.Parameter) std.Io.Writer.Error!void {
+        for (params, 0..) |p, i| {
+            if (i > 0) try self.output.writeAll(", ");
+            try self.output.writeAll(p.name);
+            try self.output.writeAll(": ");
+            try self.output.writeAll(p.type_str);
         }
     }
 

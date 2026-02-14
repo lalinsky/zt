@@ -201,7 +201,7 @@ pub const Parser = struct {
         self.skipWhitespace();
 
         if (!self.match("(")) return self.fail("expected '(' after template name", .{});
-        const params = try self.parseUntil(')');
+        const params = try self.parseParameters();
         if (!self.match(")")) return self.fail("expected ')' after template parameters", .{});
 
         self.skipWhitespace();
@@ -231,6 +231,50 @@ pub const Parser = struct {
         }
         if (self.pos == start) return self.fail("expected identifier", .{});
         return self.source[start..self.pos];
+    }
+
+    /// Parse template parameters: "name: Type, other: OtherType" -> []Parameter
+    fn parseParameters(self: *Parser) Error![]const ast.Parameter {
+        var params: std.ArrayList(ast.Parameter) = .empty;
+
+        while (true) {
+            self.skipWhitespace();
+            if (self.peek() == @as(u8, ')')) break;
+
+            // Parse parameter name
+            const name = try self.parseIdentifier();
+            self.skipWhitespace();
+
+            // Expect colon
+            if (!self.match(":")) return self.fail("expected ':' after parameter name", .{});
+            self.skipWhitespace();
+
+            // Parse type (with brace depth tracking for complex types)
+            const type_start = self.pos;
+            var depth: usize = 0;
+            while (self.peek()) |c| {
+                if (c == '(' or c == '[' or c == '{') {
+                    depth += 1;
+                    _ = self.advance();
+                } else if (c == ')' or c == ']' or c == '}') {
+                    if (depth == 0) break;
+                    depth -= 1;
+                    _ = self.advance();
+                } else if (c == ',' and depth == 0) {
+                    break;
+                } else {
+                    _ = self.advance();
+                }
+            }
+            const type_str = std.mem.trim(u8, self.source[type_start..self.pos], " \t\n\r");
+
+            try params.append(self.allocator, .{ .name = name, .type_str = type_str });
+
+            self.skipWhitespace();
+            if (!self.match(",")) break;
+        }
+
+        return params.items;
     }
 
     /// Parse until we hit the target char (not consuming it)
