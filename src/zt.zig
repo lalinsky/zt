@@ -9,7 +9,6 @@ pub const writeRaw = @import("runtime.zig").writeRaw;
 pub const writeAttr = @import("runtime.zig").writeAttr;
 pub const renderComponent = @import("runtime.zig").renderComponent;
 
-
 test {
     _ = @import("parser.zig");
     _ = @import("codegen.zig");

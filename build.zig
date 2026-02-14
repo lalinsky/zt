@@ -31,6 +31,8 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     // Tests
+    const test_filter = b.option([]const u8, "test-filter", "Filter for test names");
+
     const test_module = b.createModule(.{
         .root_source_file = b.path("src/zt.zig"),
         .target = target,
@@ -39,9 +41,12 @@ pub fn build(b: *std.Build) void {
 
     const tests = b.addTest(.{
         .root_module = test_module,
+        .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
+        .filters = if (test_filter) |f| &.{f} else &.{},
     });
 
     const run_tests = b.addRunArtifact(tests);
+    run_tests.has_side_effects = true;
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
 }
