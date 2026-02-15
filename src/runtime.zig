@@ -18,42 +18,18 @@ pub const EscapingWriter = struct {
 
         // Write all slices except the last
         for (data[0 .. data.len - 1]) |bytes| {
-            try writeEscapedBytes(self.underlying, bytes);
+            try writeEscapedString(self.underlying, bytes);
             total += bytes.len;
         }
 
         // Handle the last slice with splat (repeat count)
         const pattern = data[data.len - 1];
         for (0..splat) |_| {
-            try writeEscapedBytes(self.underlying, pattern);
+            try writeEscapedString(self.underlying, pattern);
             total += pattern.len;
         }
 
         return total;
-    }
-
-    fn writeEscapedBytes(w: *std.Io.Writer, bytes: []const u8) std.Io.Writer.Error!void {
-        var start: usize = 0;
-        for (bytes, 0..) |c, i| {
-            const escape: ?[]const u8 = switch (c) {
-                '<' => "&lt;",
-                '>' => "&gt;",
-                '&' => "&amp;",
-                '"' => "&quot;",
-                '\'' => "&#x27;",
-                else => null,
-            };
-            if (escape) |esc| {
-                if (i > start) {
-                    try w.writeAll(bytes[start..i]);
-                }
-                try w.writeAll(esc);
-                start = i + 1;
-            }
-        }
-        if (start < bytes.len) {
-            try w.writeAll(bytes[start..]);
-        }
     }
 };
 
