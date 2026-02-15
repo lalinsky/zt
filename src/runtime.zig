@@ -1,5 +1,62 @@
 const std = @import("std");
 
+/// A writer that escapes HTML special characters as it writes.
+pub const EscapingWriter = struct {
+    underlying: *std.Io.Writer,
+    interface: std.Io.Writer = .{
+        .vtable = &vtable,
+        .buffer = &.{}, // unbuffered - writes go directly to underlying
+    },
+
+    const vtable: std.Io.Writer.VTable = .{
+        .drain = drain,
+    };
+
+    fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+        const self: *EscapingWriter = @fieldParentPtr("interface", w);
+        var total: usize = 0;
+
+        // Write all slices except the last
+        for (data[0 .. data.len - 1]) |bytes| {
+            try writeEscapedBytes(self.underlying, bytes);
+            total += bytes.len;
+        }
+
+        // Handle the last slice with splat (repeat count)
+        const pattern = data[data.len - 1];
+        for (0..splat) |_| {
+            try writeEscapedBytes(self.underlying, pattern);
+            total += pattern.len;
+        }
+
+        return total;
+    }
+
+    fn writeEscapedBytes(w: *std.Io.Writer, bytes: []const u8) std.Io.Writer.Error!void {
+        var start: usize = 0;
+        for (bytes, 0..) |c, i| {
+            const escape: ?[]const u8 = switch (c) {
+                '<' => "&lt;",
+                '>' => "&gt;",
+                '&' => "&amp;",
+                '"' => "&quot;",
+                '\'' => "&#x27;",
+                else => null,
+            };
+            if (escape) |esc| {
+                if (i > start) {
+                    try w.writeAll(bytes[start..i]);
+                }
+                try w.writeAll(esc);
+                start = i + 1;
+            }
+        }
+        if (start < bytes.len) {
+            try w.writeAll(bytes[start..]);
+        }
+    }
+};
+
 /// A type-erased renderable component.
 pub const Component = struct {
     ptr: *const anyopaque,
@@ -104,13 +161,8 @@ fn writeEscapedString(writer: *std.Io.Writer, str: []const u8) std.Io.Writer.Err
 }
 
 fn writeFormatted(writer: *std.Io.Writer, value: anytype) std.Io.Writer.Error!void {
-    // Use a stack buffer for formatting
-    var buf: [256]u8 = undefined;
-    const str = std.fmt.bufPrint(&buf, "{any}", .{value}) catch {
-        try writer.writeAll("[format error]");
-        return;
-    };
-    try writeEscapedString(writer, str);
+    var escaping: EscapingWriter = .{ .underlying = writer };
+    try escaping.interface.print("{any}", .{value});
 }
 
 /// Writes an attribute, skipping it entirely if the value is null.
@@ -139,12 +191,7 @@ pub fn writeRaw(writer: *std.Io.Writer, value: anytype) std.Io.Writer.Error!void
         else => {},
     }
 
-    var buf: [256]u8 = undefined;
-    const str = std.fmt.bufPrint(&buf, "{}", .{value}) catch {
-        try writer.writeAll("[format error]");
-        return;
-    };
-    try writer.writeAll(str);
+    try writer.print("{}", .{value});
 }
 
 // =========================================================================
@@ -257,4 +304,23 @@ test "formatHtml works with pointer" {
     const html = Html{ .content = "<i>italic</i>" };
     try writeEscaped(&output.writer, &html);
     try std.testing.expectEqualStrings("<i>italic</i>", output.writer.buffer[0..output.writer.end]);
+}
+
+test "escape large array" {
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+
+    // Array that formats to >256 bytes (would have failed with old fixed buffer)
+    const large = comptime blk: {
+        var arr: [1000]u32 = undefined;
+        for (0..1000) |i| arr[i] = @intCast(i);
+        break :blk arr;
+    };
+    try writeEscaped(&output.writer, large);
+
+    // Verify output is non-empty and contains expected content
+    const result = output.writer.buffer[0..output.writer.end];
+    try std.testing.expect(result.len > 256);
+    try std.testing.expect(std.mem.startsWith(u8, result, "{ 0, 1, 2, 3,"));
+    try std.testing.expect(std.mem.endsWith(u8, result, "997, 998, 999 }"));
 }
