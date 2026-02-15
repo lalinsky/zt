@@ -15,17 +15,7 @@ pub const Parser = struct {
     allocator: std.mem.Allocator,
     err: ?ParseError = null,
 
-    pub const Error = error{
-        UnexpectedChar,
-        UnexpectedEof,
-        UnmatchedBrace,
-        InvalidTag,
-        InvalidAttribute,
-        ExpectedClosingTag,
-        InvalidExpression,
-        OutOfMemory,
-        ParseError,
-    };
+    pub const Error = error{ OutOfMemory, ParseError };
 
     pub fn init(allocator: std.mem.Allocator, source: []const u8) Parser {
         return .{
@@ -205,12 +195,7 @@ pub const Parser = struct {
         if (!self.match(")")) return self.fail("expected ')' after template parameters", .{});
 
         self.skipWhitespace();
-        if (!self.match("{")) return self.fail("expected '{{' to start template body", .{});
-
-        const body = try self.parseNodes(.template_body);
-
-        self.skipWhitespace();
-        if (!self.match("}")) return self.fail("expected '}}' to close template body", .{});
+        const body = try self.parseBracedNodes();
 
         return .{
             .name = name,
@@ -277,38 +262,53 @@ pub const Parser = struct {
         return params.items;
     }
 
-    /// Parse until we hit the target char (not consuming it)
-    fn parseUntil(self: *Parser, target: u8) Error![]const u8 {
+    // =========================================================================
+    // Common parsing helpers
+    // =========================================================================
+
+    /// Parse `(code)` - parens with balanced Zig code inside
+    fn parseParenExpr(self: *Parser) Error![]const u8 {
+        if (!self.match("(")) return self.fail("expected '('", .{});
+        const code = try self.parseZigCodeBalanced(1);
+        if (!self.match(")")) return self.fail("expected ')'", .{});
+        return code;
+    }
+
+    /// Parse `|captures|` - pipe-delimited captures
+    fn parseCaptures(self: *Parser) Error![]const u8 {
+        if (!self.match("|")) return self.fail("expected '|'", .{});
         const start = self.pos;
         while (self.peek()) |c| {
-            if (c == target) break;
+            if (c == '|') break;
             _ = self.advance();
         }
-        return self.source[start..self.pos];
+        const captures = self.source[start..self.pos];
+        if (!self.match("|")) return self.fail("expected '|'", .{});
+        return captures;
+    }
+
+    /// Parse `{ nodes }` - braced block of nodes
+    fn parseBracedNodes(self: *Parser) Error![]const ast.Node {
+        if (!self.match("{")) return self.fail("expected '{{'", .{});
+        const nodes = try self.parseNodes();
+        self.skipWhitespace();
+        if (!self.match("}")) return self.fail("expected '}}'", .{});
+        return nodes;
     }
 
     // =========================================================================
     // Node parsing - the main recursive descent
     // =========================================================================
 
-    const Context = enum {
-        template_body, // Top-level or inside element
-        expression, // Inside { }
-    };
-
-    fn parseNodes(self: *Parser, ctx: Context) Error![]const ast.Node {
+    fn parseNodes(self: *Parser) Error![]const ast.Node {
         var nodes: std.ArrayList(ast.Node) = .empty;
 
         while (true) {
             self.skipWhitespace();
-
             const c = self.peek() orelse break;
+            if (c == '}' or self.check("</")) break;
 
-            // End conditions based on context
-            if (ctx == .template_body and c == '}') break;
-            if (ctx == .template_body and c == '<' and self.check("</")) break;
-
-            if (try self.parseNode(ctx)) |node| {
+            if (try self.parseNode()) |node| {
                 try nodes.append(self.allocator, node);
             } else {
                 break;
@@ -318,51 +318,24 @@ pub const Parser = struct {
         return nodes.items;
     }
 
-    fn parseNode(self: *Parser, ctx: Context) Error!?ast.Node {
+    fn parseNode(self: *Parser) Error!?ast.Node {
         const c = self.peek() orelse return null;
 
-        // Element: <tag ...>
         if (c == '<') {
-            if (self.check("</")) return null; // Closing tag, not a node
+            if (self.check("</")) return null;
             if (self.check("<!")) {
-                // Skip comments/doctype for now
                 try self.skipComment();
-                return self.parseNode(ctx);
+                return self.parseNode();
             }
             return .{ .element = try self.parseElement() };
         }
+        if (c == '@') return .{ .component_call = try self.parseComponentCall() };
+        if (c == '{') return .{ .expr = try self.parseExprBlock() };
+        if (self.check("for ")) return .{ .for_stmt = try self.parseForStatement() };
+        if (self.check("if ")) return .{ .if_stmt = try self.parseIfStatement() };
+        if (self.check("switch ")) return .{ .switch_stmt = try self.parseSwitchStatement() };
 
-        // Component call: @Name(args)
-        if (c == '@') {
-            return .{ .component_call = try self.parseComponentCall() };
-        }
-
-        // Expression block: { ... }
-        if (c == '{') {
-            return .{ .expr = try self.parseExprBlock() };
-        }
-
-        // Block-level for: for (iter) |cap| { ... }
-        if (ctx == .template_body and self.check("for ")) {
-            return .{ .for_stmt = try self.parseForStatement() };
-        }
-
-        // Block-level if: if (cond) { ... }
-        if (ctx == .template_body and self.check("if ")) {
-            return .{ .if_stmt = try self.parseIfStatement() };
-        }
-
-        // Block-level switch: switch (expr) { ... }
-        if (ctx == .template_body and self.check("switch ")) {
-            return .{ .switch_stmt = try self.parseSwitchStatement() };
-        }
-
-        // Text content (only in template body context)
-        if (ctx == .template_body) {
-            return .{ .text = try self.parseText() };
-        }
-
-        return null;
+        return .{ .text = try self.parseText() };
     }
 
     // =========================================================================
@@ -393,7 +366,7 @@ pub const Parser = struct {
         if (!self.match(">")) return self.fail("expected '>' to close opening tag", .{});
 
         // Parse children
-        const children = try self.parseNodes(.template_body);
+        const children = try self.parseNodes();
 
         // Closing tag: </tag>
         self.skipWhitespace();
@@ -548,29 +521,16 @@ pub const Parser = struct {
     fn parseIfExpr(self: *Parser) Error!ast.IfExpr {
         _ = self.match("if");
         self.skipSpaces();
-
-        // Parse condition: (cond)
-        if (!self.match("(")) return self.fail("expected '(' after 'if'", .{});
-        const condition = try self.parseZigCodeBalanced(1);
-        if (!self.match(")")) return self.fail("expected ')' after if condition", .{});
-
+        const condition = try self.parseParenExpr();
         self.skipSpaces();
-
-        // Parse then branch
         const then_branch = try self.parseBranch();
-
-        // Check for else
         self.skipSpaces();
         const else_branch: ?ast.Branch = if (self.match("else")) blk: {
             self.skipSpaces();
             break :blk try self.parseBranch();
         } else null;
 
-        return .{
-            .condition = condition,
-            .then_branch = then_branch,
-            .else_branch = else_branch,
-        };
+        return .{ .condition = condition, .then_branch = then_branch, .else_branch = else_branch };
     }
 
     fn parseBranch(self: *Parser) Error!ast.Branch {
@@ -614,7 +574,7 @@ pub const Parser = struct {
         self.skipWhitespace();
         var children: []const ast.Node = &.{};
         if (self.match("{")) {
-            children = try self.parseNodes(.template_body);
+            children = try self.parseNodes();
             self.skipWhitespace();
             if (!self.match("}")) return self.fail("expected '}}' to close component children block", .{});
         }
@@ -648,34 +608,13 @@ pub const Parser = struct {
     fn parseForExpr(self: *Parser) Error!ast.ForExpr {
         _ = self.match("for");
         self.skipSpaces();
-
-        // Parse iterable: (iter)
-        if (!self.match("(")) return self.fail("expected '(' after 'for'", .{});
-        const iterable = try self.parseZigCodeBalanced(1);
-        if (!self.match(")")) return self.fail("expected ')' after for iterable", .{});
-
+        const iterable = try self.parseParenExpr();
         self.skipSpaces();
-
-        // Parse captures: |item| or |item, index|
-        if (!self.match("|")) return self.fail("expected '|' to start captures", .{});
-        const captures_start = self.pos;
-        while (self.peek()) |c| {
-            if (c == '|') break;
-            _ = self.advance();
-        }
-        const captures = self.source[captures_start..self.pos];
-        if (!self.match("|")) return self.fail("expected '|' to close captures", .{});
-
+        const captures = try self.parseCaptures();
         self.skipSpaces();
-
-        // Parse body branch
         const body = try self.parseBranch();
 
-        return .{
-            .iterable = iterable,
-            .captures = captures,
-            .body = body,
-        };
+        return .{ .iterable = iterable, .captures = captures, .body = body };
     }
 
     // =========================================================================
@@ -687,43 +626,23 @@ pub const Parser = struct {
         _ = self.match("if");
         self.skipSpaces();
 
-        // Parse condition
-        if (!self.match("(")) return self.fail("expected '(' after 'if'", .{});
-        const condition = try self.parseZigCodeBalanced(1);
-        if (!self.match(")")) return self.fail("expected ')' after if condition", .{});
-
+        const condition = try self.parseParenExpr();
         self.skipWhitespace();
+        const then_body = try self.parseBracedNodes();
 
-        // Parse then body
-        if (!self.match("{")) return self.fail("expected '{{' after if condition", .{});
-        const then_body = try self.parseNodes(.template_body);
-        self.skipWhitespace();
-        if (!self.match("}")) return self.fail("expected '}}' to close if body", .{});
-
-        // Check for else / else if
         self.skipWhitespace();
         const else_body: ?[]const ast.Node = if (self.match("else")) blk: {
             self.skipWhitespace();
-            // else if: parse nested if statement
             if (self.check("if ") or self.check("if(")) {
                 const nested_if = try self.parseIfStatement();
                 const nodes = try self.allocator.alloc(ast.Node, 1);
                 nodes[0] = .{ .if_stmt = nested_if };
                 break :blk nodes;
             }
-            if (!self.match("{")) return self.fail("expected '{{' or 'if' after 'else'", .{});
-            const body = try self.parseNodes(.template_body);
-            self.skipWhitespace();
-            if (!self.match("}")) return self.fail("expected '}}' to close else body", .{});
-            break :blk body;
+            break :blk try self.parseBracedNodes();
         } else null;
 
-        return .{
-            .condition = condition,
-            .then_body = then_body,
-            .else_body = else_body,
-            .loc = loc,
-        };
+        return .{ .condition = condition, .then_body = then_body, .else_body = else_body, .loc = loc };
     }
 
     // =========================================================================
@@ -735,37 +654,13 @@ pub const Parser = struct {
         _ = self.match("for");
         self.skipSpaces();
 
-        // Parse iterable
-        if (!self.match("(")) return self.fail("expected '(' after 'for'", .{});
-        const iterable = try self.parseZigCodeBalanced(1);
-        if (!self.match(")")) return self.fail("expected ')' after for iterable", .{});
-
+        const iterable = try self.parseParenExpr();
         self.skipSpaces();
-
-        // Parse captures
-        if (!self.match("|")) return self.fail("expected '|' to start captures", .{});
-        const captures_start = self.pos;
-        while (self.peek()) |c| {
-            if (c == '|') break;
-            _ = self.advance();
-        }
-        const captures = self.source[captures_start..self.pos];
-        if (!self.match("|")) return self.fail("expected '|' to close captures", .{});
-
+        const captures = try self.parseCaptures();
         self.skipWhitespace();
+        const body = try self.parseBracedNodes();
 
-        // Parse body
-        if (!self.match("{")) return self.fail("expected '{{' after for captures", .{});
-        const body = try self.parseNodes(.template_body);
-        self.skipWhitespace();
-        if (!self.match("}")) return self.fail("expected '}}' to close for body", .{});
-
-        return .{
-            .iterable = iterable,
-            .captures = captures,
-            .body = body,
-            .loc = loc,
-        };
+        return .{ .iterable = iterable, .captures = captures, .body = body, .loc = loc };
     }
 
     // =========================================================================
@@ -777,72 +672,42 @@ pub const Parser = struct {
         _ = self.match("switch");
         self.skipSpaces();
 
-        // Parse value
-        if (!self.match("(")) return self.fail("expected '(' after 'switch'", .{});
-        const value = try self.parseZigCodeBalanced(1);
-        if (!self.match(")")) return self.fail("expected ')' after switch expression", .{});
-
+        const value = try self.parseParenExpr();
         self.skipWhitespace();
 
-        // Parse cases
         if (!self.match("{")) return self.fail("expected '{{' to start switch body", .{});
         var cases: std.ArrayList(ast.SwitchCase) = .empty;
 
         while (true) {
             self.skipWhitespace();
             if (self.peek() == @as(u8, '}')) break;
-
-            const case = try self.parseSwitchCase();
-            try cases.append(self.allocator, case);
-
+            try cases.append(self.allocator, try self.parseSwitchCase());
             self.skipWhitespace();
-            _ = self.match(","); // optional comma
+            _ = self.match(",");
         }
 
         if (!self.match("}")) return self.fail("expected '}}' to close switch body", .{});
-
-        return .{
-            .value = value,
-            .cases = cases.items,
-            .loc = loc,
-        };
+        return .{ .value = value, .cases = cases.items, .loc = loc };
     }
 
     fn parseSwitchCase(self: *Parser) Error!ast.SwitchCase {
-        // Parse pattern: .foo, .bar, else, _, inline else, etc.
         const pattern = try self.parseSwitchPattern();
         self.skipSpaces();
-
-        // Arrow
         if (!self.match("=>")) return self.fail("expected '=>' after switch pattern", .{});
         self.skipSpaces();
 
-        // Optional capture: |val|
-        var capture: ?[]const u8 = null;
-        if (self.match("|")) {
-            const capture_start = self.pos;
-            while (self.peek()) |c| {
-                if (c == '|') break;
-                _ = self.advance();
-            }
-            capture = self.source[capture_start..self.pos];
-            if (!self.match("|")) return self.fail("expected '|' to close capture", .{});
-            self.skipWhitespace();
-        }
+        const capture: ?[]const u8 = if (self.peek() == @as(u8, '|'))
+            try self.parseCaptures()
+        else
+            null;
 
-        // Body: { nodes } or single branch
-        const body: ast.SwitchCase.Body = if (self.match("{")) blk: {
-            const nodes = try self.parseNodes(.template_body);
-            self.skipWhitespace();
-            if (!self.match("}")) return self.fail("expected '}}' to close switch case body", .{});
-            break :blk .{ .nodes = nodes };
-        } else .{ .branch = try self.parseBranch() };
+        self.skipWhitespace();
+        const body: ast.SwitchCase.Body = if (self.peek() == @as(u8, '{'))
+            .{ .nodes = try self.parseBracedNodes() }
+        else
+            .{ .branch = try self.parseBranch() };
 
-        return .{
-            .pattern = pattern,
-            .capture = capture,
-            .body = body,
-        };
+        return .{ .pattern = pattern, .capture = capture, .body = body };
     }
 
     fn parseSwitchPattern(self: *Parser) Error![]const u8 {
@@ -866,65 +731,34 @@ pub const Parser = struct {
     fn parseSwitchExpr(self: *Parser) Error!ast.SwitchExpr {
         _ = self.match("switch");
         self.skipSpaces();
-
-        // Parse value
-        if (!self.match("(")) return self.fail("expected '(' after 'switch'", .{});
-        const value = try self.parseZigCodeBalanced(1);
-        if (!self.match(")")) return self.fail("expected ')' after switch expression", .{});
-
+        const value = try self.parseParenExpr();
         self.skipSpaces();
 
-        // Parse inline cases (no outer braces in inline form)
         var cases: std.ArrayList(ast.SwitchBranch) = .empty;
-
         while (true) {
             self.skipSpaces();
-            const c = self.peek() orelse break;
-            if (c == '}') break; // end of expression block
-
-            const branch = try self.parseSwitchBranch();
-            try cases.append(self.allocator, branch);
-
+            if (self.peek() == @as(u8, '}')) break;
+            try cases.append(self.allocator, try self.parseSwitchBranch());
             self.skipSpaces();
-            if (!self.match(",")) break; // no more cases
+            if (!self.match(",")) break;
         }
 
-        return .{
-            .value = value,
-            .cases = cases.items,
-        };
+        return .{ .value = value, .cases = cases.items };
     }
 
     fn parseSwitchBranch(self: *Parser) Error!ast.SwitchBranch {
-        // Parse pattern
         const pattern = try self.parseSwitchPattern();
         self.skipSpaces();
-
-        // Arrow
         if (!self.match("=>")) return self.fail("expected '=>' after switch pattern", .{});
         self.skipSpaces();
 
-        // Optional capture
-        var capture: ?[]const u8 = null;
-        if (self.match("|")) {
-            const capture_start = self.pos;
-            while (self.peek()) |c| {
-                if (c == '|') break;
-                _ = self.advance();
-            }
-            capture = self.source[capture_start..self.pos];
-            if (!self.match("|")) return self.fail("expected '|' to close capture", .{});
-            self.skipSpaces();
-        }
+        const capture: ?[]const u8 = if (self.peek() == @as(u8, '|'))
+            try self.parseCaptures()
+        else
+            null;
 
-        // Branch body (element, component call, or zig code)
-        const body = try self.parseBranch();
-
-        return .{
-            .pattern = pattern,
-            .capture = capture,
-            .body = body,
-        };
+        self.skipSpaces();
+        return .{ .pattern = pattern, .capture = capture, .body = try self.parseBranch() };
     }
 
     // =========================================================================
@@ -940,13 +774,13 @@ pub const Parser = struct {
         while (self.peek()) |c| {
             // Handle string literals
             if (c == '"') {
-                try self.skipString();
+                self.skipQuoted('"');
                 continue;
             }
 
             // Handle char literals
             if (c == '\'') {
-                try self.skipCharLiteral();
+                self.skipQuoted('\'');
                 continue;
             }
 
@@ -992,13 +826,13 @@ pub const Parser = struct {
         while (self.peek()) |c| {
             // Handle strings
             if (c == '"') {
-                try self.skipString();
+                self.skipQuoted('"');
                 continue;
             }
 
             // Handle char literals
             if (c == '\'') {
-                try self.skipCharLiteral();
+                self.skipQuoted('\'');
                 continue;
             }
 
@@ -1022,28 +856,13 @@ pub const Parser = struct {
         return std.mem.trim(u8, self.source[start..self.pos], " \t\n\r");
     }
 
-    fn skipString(self: *Parser) Error!void {
-        _ = self.advance(); // opening "
-        while (self.peek()) |c| {
-            if (c == '\\') {
-                _ = self.advance();
-                _ = self.advance(); // skip escaped char
-            } else if (c == '"') {
-                _ = self.advance();
-                break;
-            } else {
-                _ = self.advance();
-            }
-        }
-    }
-
-    fn skipCharLiteral(self: *Parser) Error!void {
-        _ = self.advance(); // opening '
+    fn skipQuoted(self: *Parser, quote: u8) void {
+        _ = self.advance(); // opening quote
         while (self.peek()) |c| {
             if (c == '\\') {
                 _ = self.advance();
                 _ = self.advance();
-            } else if (c == '\'') {
+            } else if (c == quote) {
                 _ = self.advance();
                 break;
             } else {
