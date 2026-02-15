@@ -548,6 +548,13 @@ pub const Parser = struct {
             return .{ .component_call = try self.parseComponentCall() };
         }
 
+        // Nested if: if (cond) branch else branch
+        if (self.check("if ") or self.check("if(")) {
+            const if_expr = try self.allocator.create(ast.IfExpr);
+            if_expr.* = try self.parseIfExpr();
+            return .{ .if_expr = if_expr };
+        }
+
         // Zig code branch (until else or })
         return .{ .zig_code = try self.parseZigCodeUntilBranchEnd() };
     }
@@ -1006,6 +1013,41 @@ test "parse inline if without else" {
     const if_expr = template.body[0].expr.content.if_expr;
     try std.testing.expect(if_expr.then_branch == .element);
     try std.testing.expect(if_expr.else_branch == null);
+}
+
+test "parse inline else if" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test(x: i32) {
+        \\    {if (x == 1) <span>one</span> else if (x == 2) <span>two</span> else <span>other</span>}
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    // First if: x == 1
+    const if_expr = template.body[0].expr.content.if_expr;
+    try std.testing.expectEqualStrings("x == 1", if_expr.condition);
+    try std.testing.expect(if_expr.then_branch == .element);
+    try std.testing.expectEqualStrings("span", if_expr.then_branch.element.tag);
+
+    // Else branch is a nested if
+    try std.testing.expect(if_expr.else_branch != null);
+    try std.testing.expect(if_expr.else_branch.? == .if_expr);
+
+    // Nested if: x == 2
+    const nested = if_expr.else_branch.?.if_expr;
+    try std.testing.expectEqualStrings("x == 2", nested.condition);
+    try std.testing.expect(nested.then_branch == .element);
+    try std.testing.expectEqualStrings("span", nested.then_branch.element.tag);
+
+    // Final else
+    try std.testing.expect(nested.else_branch != null);
+    try std.testing.expect(nested.else_branch.? == .element);
+    try std.testing.expectEqualStrings("span", nested.else_branch.?.element.tag);
 }
 
 test "parse inline for with element" {

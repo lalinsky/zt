@@ -429,6 +429,7 @@ pub const Generator = struct {
         switch (branch) {
             .element => |elem| try self.generateElement(elem.*),
             .component_call => |call| try self.generateComponentCall(call),
+            .if_expr => |if_expr| try self.generateIfExpr(if_expr.*, raw),
             .zig_code => |code| {
                 try self.writeIndent();
                 if (raw) {
