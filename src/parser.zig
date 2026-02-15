@@ -700,11 +700,18 @@ pub const Parser = struct {
         self.skipWhitespace();
         if (!self.match("}")) return self.fail("expected '}}' to close if body", .{});
 
-        // Check for else
+        // Check for else / else if
         self.skipWhitespace();
         const else_body: ?[]const ast.Node = if (self.match("else")) blk: {
             self.skipWhitespace();
-            if (!self.match("{")) return self.fail("expected '{{' after 'else'", .{});
+            // else if: parse nested if statement
+            if (self.check("if ") or self.check("if(")) {
+                const nested_if = try self.parseIfStatement();
+                const nodes = try self.allocator.alloc(ast.Node, 1);
+                nodes[0] = .{ .if_stmt = nested_if };
+                break :blk nodes;
+            }
+            if (!self.match("{")) return self.fail("expected '{{' or 'if' after 'else'", .{});
             const body = try self.parseNodes(.template_body);
             self.skipWhitespace();
             if (!self.match("}")) return self.fail("expected '}}' to close else body", .{});
@@ -1280,6 +1287,38 @@ test "parse block if statement" {
     try std.testing.expectEqual(@as(usize, 1), if_stmt.then_body.len);
     try std.testing.expect(if_stmt.else_body != null);
     try std.testing.expectEqual(@as(usize, 1), if_stmt.else_body.?.len);
+}
+
+test "parse else if chain" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test(x: i32) {
+        \\    if (x == 1) {
+        \\        <span>one</span>
+        \\    } else if (x == 2) {
+        \\        <span>two</span>
+        \\    } else {
+        \\        <span>other</span>
+        \\    }
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const if_stmt = template.body[0].if_stmt;
+    try std.testing.expectEqualStrings("x == 1", if_stmt.condition);
+
+    // else body contains a single if_stmt (the else-if)
+    try std.testing.expect(if_stmt.else_body != null);
+    try std.testing.expectEqual(@as(usize, 1), if_stmt.else_body.?.len);
+    try std.testing.expect(if_stmt.else_body.?[0] == .if_stmt);
+
+    const else_if = if_stmt.else_body.?[0].if_stmt;
+    try std.testing.expectEqualStrings("x == 2", else_if.condition);
+    try std.testing.expect(else_if.else_body != null);
 }
 
 test "parse nested inline expressions" {

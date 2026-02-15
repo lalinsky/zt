@@ -474,6 +474,45 @@ pub const Generator = struct {
         self.indent -= 1;
 
         if (stmt.else_body) |else_body| {
+            // Check for else-if chain: single if_stmt node
+            if (else_body.len == 1 and else_body[0] == .if_stmt) {
+                try self.writeIndent();
+                try self.output.writeAll("} else ");
+                try self.generateIfStmtInline(else_body[0].if_stmt);
+                return;
+            }
+            try self.writeIndent();
+            try self.output.writeAll("} else {\n");
+            self.indent += 1;
+            for (else_body) |node| {
+                try self.generateNode(node);
+            }
+            self.indent -= 1;
+        }
+
+        try self.writeIndent();
+        try self.output.writeAll("}\n");
+    }
+
+    /// Generate if statement without leading indent (for else-if chains)
+    fn generateIfStmtInline(self: *Generator, stmt: ast.IfStatement) std.Io.Writer.Error!void {
+        try self.output.writeAll("if (");
+        try self.output.writeAll(stmt.condition);
+        try self.output.writeAll(") {\n");
+
+        self.indent += 1;
+        for (stmt.then_body) |node| {
+            try self.generateNode(node);
+        }
+        self.indent -= 1;
+
+        if (stmt.else_body) |else_body| {
+            if (else_body.len == 1 and else_body[0] == .if_stmt) {
+                try self.writeIndent();
+                try self.output.writeAll("} else ");
+                try self.generateIfStmtInline(else_body[0].if_stmt);
+                return;
+            }
             try self.writeIndent();
             try self.output.writeAll("} else {\n");
             self.indent += 1;
@@ -953,4 +992,34 @@ test "generate inline for with index" {
 
     const result = output.writer.buffer[0..output.writer.end];
     try std.testing.expect(std.mem.indexOf(u8, result, "for (items, 0..) |item, idx|") != null);
+}
+
+test "generate else if chain" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const parser = @import("parser.zig");
+
+    const source =
+        \\templ test(x: i32) {
+        \\    if (x == 1) {
+        \\        <span>one</span>
+        \\    } else if (x == 2) {
+        \\        <span>two</span>
+        \\    } else {
+        \\        <span>other</span>
+        \\    }
+        \\}
+    ;
+
+    var p = parser.Parser.init(arena.allocator(), source);
+    const template = try p.parseTemplate();
+
+    var output: std.Io.Writer.Allocating = .init(arena.allocator());
+    var gen = Generator.init(&output.writer);
+    try gen.generate(template);
+
+    const result = output.writer.buffer[0..output.writer.end];
+    // Should generate "} else if (" not "} else {\n    if ("
+    try std.testing.expect(std.mem.indexOf(u8, result, "} else if (x == 2)") != null);
 }
