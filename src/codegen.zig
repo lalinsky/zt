@@ -560,13 +560,11 @@ pub const Generator = struct {
     }
 
     fn writeChildrenParamName(self: *Generator, index: usize) std.Io.Writer.Error!void {
-        try self.output.writeAll("__children_");
-        try self.output.writeByte('0' + @as(u8, @intCast(index)));
+        try self.output.print("__children_{d}", .{index});
     }
 
     fn writeChildrenStructSuffix(self: *Generator, index: usize) std.Io.Writer.Error!void {
-        try self.output.writeAll("__children_");
-        try self.output.writeByte('0' + @as(u8, @intCast(index)));
+        try self.output.print("__children_{d}", .{index});
     }
 
     /// Check if a body uses @children (needs implicit children param).
