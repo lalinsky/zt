@@ -1,7 +1,14 @@
 # Zig Templating
 
 Small HTML templating language that compiles to Zig at build-time.
-Inspired by [JSX], [Zeix] and [Templ].
+Inspired by [Templ], [Zeix] and [JSX].
+
+The idea is to invent as little syntax as possible, just enough to make it possible to interweave real Zig code with HTML elements.
+Using this approach, the template compiler can stay very simple and delegate Zig code analysis to the real Zig compiler.
+
+Templates are transpiled into Zig source files as part of `zig build`, so can you just import them like any other
+source files in your application. Everything is fully type-checked by the Zig compiler, and there is no 
+overhead at runtime. Output is directly written to the provided `std.Io.Writer`, so there are is no state and no allocations.
 
 [JSX]: https://react.dev/learn#writing-markup-with-jsx
 [Zeix]: https://ziex.dev/
