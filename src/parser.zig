@@ -130,8 +130,10 @@ pub const Parser = struct {
             } else {
                 // Parse Zig code until next template or EOF
                 const zig_start = self.pos;
-                while (self.peek() != null and !self.isAtTemplate()) {
+                while (self.peek() != null) {
                     self.skipToNextLine();
+                    self.skipWhitespace();
+                    if (self.isAtTemplate()) break;
                 }
                 const zig_code = std.mem.trim(u8, self.source[zig_start..self.pos], " \t\n\r");
                 if (zig_code.len > 0) {
@@ -556,7 +558,26 @@ pub const Parser = struct {
         }
 
         // Zig code branch (until else or })
-        return .{ .zig_code = try self.parseZigCodeUntilBranchEnd() };
+        return .{ .zig_code = try self.parseZigCodeUntilBranchEnd(false) };
+    }
+
+    fn parseSwitchBranchBody(self: *Parser) Error!ast.Branch {
+        const c = self.peek() orelse return self.fail("unexpected end of file in branch", .{});
+
+        // Element branch: <tag>...</tag>
+        if (c == '<' and !self.check("</")) {
+            const elem = try self.allocator.create(ast.Element);
+            elem.* = try self.parseElement();
+            return .{ .element = elem };
+        }
+
+        // Component call branch: @Name(args)
+        if (c == '@') {
+            return .{ .component_call = try self.parseComponentCall() };
+        }
+
+        // Zig code branch (until comma or } for switch)
+        return .{ .zig_code = try self.parseZigCodeUntilBranchEnd(true) };
     }
 
     // =========================================================================
@@ -765,7 +786,7 @@ pub const Parser = struct {
             null;
 
         self.skipSpaces();
-        return .{ .pattern = pattern, .capture = capture, .body = try self.parseBranch() };
+        return .{ .pattern = pattern, .capture = capture, .body = try self.parseSwitchBranchBody() };
     }
 
     // =========================================================================
@@ -824,8 +845,9 @@ pub const Parser = struct {
         return std.mem.trim(u8, self.source[start..self.pos], " \t\n\r");
     }
 
-    /// Parse Zig code until we hit `else` or `}` at depth 0
-    fn parseZigCodeUntilBranchEnd(self: *Parser) Error![]const u8 {
+    /// Parse Zig code until we hit `else` or `}` at depth 0.
+    /// If stop_at_comma is true, also stop at `,` at depth 0 (for switch branches).
+    fn parseZigCodeUntilBranchEnd(self: *Parser, stop_at_comma: bool) Error![]const u8 {
         const start = self.pos;
         var brace_depth: usize = 0;
         var paren_depth: usize = 0;
@@ -845,6 +867,11 @@ pub const Parser = struct {
 
             // Check for `else` keyword at depth 0
             if (brace_depth == 0 and paren_depth == 0 and self.check("else")) {
+                break;
+            }
+
+            // Stop at comma for switch branches
+            if (stop_at_comma and brace_depth == 0 and paren_depth == 0 and c == ',') {
                 break;
             }
 

@@ -24,12 +24,28 @@ def test_inline_if_else(zt):
     assert result == '<i>no</i>'
 
 
+def test_inline_if_zig_expr(zt):
+    result = zt.run(
+        'pub templ run(x: bool) { {if (x) "yes" else "no"} }',
+        args='.{true}',
+    )
+    assert result == 'yes'
+
+
 def test_inline_for(zt):
     result = zt.run(
         'pub templ run(items: []const []const u8) { {for (items) |x| <i>{x}</i>} }',
         args='.{&[_][]const u8{"a", "b"}}',
     )
     assert result == '<i>a</i><i>b</i>'
+
+
+def test_inline_for_zig_expr(zt):
+    result = zt.run(
+        'pub templ run(items: []const i32) { {for (items) |x| x * 2} }',
+        args='.{&[_]i32{1, 2, 3}}',
+    )
+    assert result == '246'
 
 
 # Block-level control flow
@@ -86,3 +102,130 @@ def test_block_for_index(zt):
         args='.{&[_][]const u8{"a", "b"}}',
     )
     assert result == '<span>0:a</span><span>1:b</span>'
+
+
+# Switch
+
+def test_switch_basic(zt):
+    result = zt.run(
+        '''const Status = enum { active, pending, inactive };
+
+        pub templ run(s: Status) {
+            switch (s) {
+                .active => { <span>Active</span> },
+                .pending => { <span>Pending</span> },
+                .inactive => { <span>Inactive</span> },
+            }
+        }''',
+        args='.{.active}',
+    )
+    assert result == '<span>Active</span>'
+
+
+def test_switch_else(zt):
+    result = zt.run(
+        '''const Status = enum { active, pending, inactive };
+
+        pub templ run(s: Status) {
+            switch (s) {
+                .active => { <span>Active</span> },
+                else => { <span>Other</span> },
+            }
+        }''',
+        args='.{.inactive}',
+    )
+    assert result == '<span>Other</span>'
+
+
+def test_switch_non_block_case(zt):
+    result = zt.run(
+        '''const Status = enum { active, pending, inactive };
+
+        pub templ run(s: Status) {
+            switch (s) {
+                .active => <span>Active</span>,
+                .pending => <span>Pending</span>,
+                else => <span>Other</span>,
+            }
+        }''',
+        args='.{.pending}',
+    )
+    assert result == '<span>Pending</span>'
+
+
+def test_switch_capture(zt):
+    result = zt.run(
+        '''const Value = union(enum) { num: i32, text: []const u8 };
+
+        pub templ run(v: Value) {
+            switch (v) {
+                .num => |n| { <span>{n}</span> },
+                .text => |t| { <span>{t}</span> },
+            }
+        }''',
+        args='.{.{ .num = 42 }}',
+    )
+    assert result == '<span>42</span>'
+
+
+def test_switch_capture_text(zt):
+    result = zt.run(
+        '''const Value = union(enum) { num: i32, text: []const u8 };
+
+        pub templ run(v: Value) {
+            switch (v) {
+                .num => |n| { <span>{n}</span> },
+                .text => |t| { <span>{t}</span> },
+            }
+        }''',
+        args='.{.{ .text = "hello" }}',
+    )
+    assert result == '<span>hello</span>'
+
+
+def test_inline_switch(zt):
+    result = zt.run(
+        '''const Role = enum { admin, user, guest };
+
+        pub templ run(r: Role) {
+            {switch (r) .admin => <b>Admin</b>, .user => <i>User</i>, else => <span>Guest</span>}
+        }''',
+        args='.{.user}',
+    )
+    assert result == '<i>User</i>'
+
+
+def test_inline_switch_else(zt):
+    result = zt.run(
+        '''const Role = enum { admin, user, guest };
+
+        pub templ run(r: Role) {
+            {switch (r) .admin => <b>Admin</b>, else => <span>Other</span>}
+        }''',
+        args='.{.guest}',
+    )
+    assert result == '<span>Other</span>'
+
+
+def test_inline_switch_zig_expr(zt):
+    result = zt.run(
+        '''const Status = enum { active, pending, inactive };
+
+        pub templ run(s: Status) {
+            {switch (s) .active => "Active", .pending => "Pending", else => "Other"}
+        }''',
+        args='.{.active}',
+    )
+    assert result == 'Active'
+
+
+def test_switch_capture_zig_expr(zt):
+    result = zt.run(
+        '''const Value = union(enum) { num: i32, text: []const u8 };
+
+        pub templ run(v: Value) {
+            {switch (v) .num => |n| n * 2, .text => |t| t.len}
+        }''',
+        args='.{.{ .num = 21 }}',
+    )
+    assert result == '42'
