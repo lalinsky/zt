@@ -7,3 +7,5 @@ examples/src/templates/*.zig
 
 # Test artifacts
 examples/output.actual.txt
+__pycache__/
+.pytest_cache/

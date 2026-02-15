@@ -7,11 +7,12 @@ IFS=$'\n\t'
 CI_MODE=false
 VERBOSE=false
 RELEASE_MODE=false
+FULL_MODE=false
 TEST_FILTER=""
 
 # Parse arguments
 usage() {
-  echo "Usage: $0 [--filter \"test name\"] [--ci] [--release] [--verbose]"
+  echo "Usage: $0 [--filter \"test name\"] [--ci] [--release] [--verbose] [--full]"
 }
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -33,6 +34,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --verbose|-v)
             VERBOSE=true
+            shift
+            ;;
+        --full)
+            FULL_MODE=true
             shift
             ;;
         *)
@@ -67,14 +72,9 @@ if [ "$VERBOSE" = true ]; then
 fi
 eval zig build $BUILD_ARGS --summary all
 
-echo "=== Checking example output ==="
-cd examples
-zig build run > output.actual.txt 2>&1
-if ! diff -u output.txt output.actual.txt; then
-    echo "Example output mismatch!"
-    exit 1
+if [ "$FULL_MODE" = true ]; then
+    echo "=== Running integration tests ==="
+    python -m pytest tests/ -v
 fi
-rm -f output.actual.txt
-cd ..
 
 echo "=== All checks passed! ==="
