@@ -613,8 +613,7 @@ pub const Parser = struct {
         // Optional children block: @Name(args) { ... }
         self.skipWhitespace();
         var children: []const ast.Node = &.{};
-        if (self.pos < self.source.len and self.source[self.pos] == '{') {
-            self.pos += 1; // skip {
+        if (self.match("{")) {
             children = try self.parseNodes(.template_body);
             self.skipWhitespace();
             if (!self.match("}")) return self.fail("expected '}}' to close component children block", .{});
