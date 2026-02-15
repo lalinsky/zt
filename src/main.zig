@@ -50,6 +50,7 @@ fn compileTemplate(allocator: std.mem.Allocator, input_path: []const u8) !void {
     try output.writer.writeAll("const zt = @import(\"zt\");\n\n");
 
     var gen = zt.Generator.init(&output.writer);
+    gen.source_file = std.fs.path.basename(input_path);
     gen.generateFile(file) catch |err| {
         std.debug.print("Error generating code: {}\n", .{err});
         return error.GenerateFailed;

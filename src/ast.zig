@@ -34,6 +34,8 @@ pub const Element = struct {
     attributes: []const Attribute,
     children: []const Node,
     self_closing: bool,
+    loc: Location = .{},
+    end_loc: Location = .{},
 };
 
 pub const Attribute = struct {
@@ -55,6 +57,7 @@ pub const Text = struct {
 pub const Expr = struct {
     content: Content,
     raw: bool = false, // {!expr} for unescaped output
+    loc: Location = .{},
 
     pub const Content = union(enum) {
         zig_code: []const u8,
@@ -91,6 +94,7 @@ pub const ComponentCall = struct {
     name: []const u8,
     args: []const u8,
     children: []const Node = &.{},
+    loc: Location = .{},
 };
 
 /// Block-level: if (cond) { ... } else { ... }
@@ -98,6 +102,7 @@ pub const IfStatement = struct {
     condition: []const u8,
     then_body: []const Node,
     else_body: ?[]const Node,
+    loc: Location = .{},
 };
 
 /// Block-level: for (iter) |capture| { ... }
@@ -105,12 +110,14 @@ pub const ForStatement = struct {
     iterable: []const u8,
     captures: []const u8,
     body: []const Node,
+    loc: Location = .{},
 };
 
 /// Block-level: switch (expr) { .case => { ... }, ... }
 pub const SwitchStatement = struct {
     value: []const u8,
     cases: []const SwitchCase,
+    loc: Location = .{},
 };
 
 /// A single switch case
@@ -139,6 +146,6 @@ pub const SwitchBranch = struct {
 };
 
 pub const Location = struct {
-    line: usize,
-    column: usize,
+    line: usize = 0,
+    column: usize = 0,
 };

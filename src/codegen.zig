@@ -5,6 +5,8 @@ pub const Generator = struct {
     output: *std.Io.Writer,
     indent: usize,
     children_call_index: usize = 0,
+    source_file: []const u8 = "",
+    last_emitted_line: usize = 0,
 
     pub fn init(output: *std.Io.Writer) Generator {
         return .{
@@ -255,7 +257,16 @@ pub const Generator = struct {
         }
     }
 
+    fn writeSourceLoc(self: *Generator, loc: ast.Location) std.Io.Writer.Error!void {
+        if (self.source_file.len == 0 or loc.line == 0) return;
+        if (loc.line == self.last_emitted_line) return;
+        self.last_emitted_line = loc.line;
+        try self.writeIndent();
+        try self.output.print("// {s}:{d}\n", .{ self.source_file, loc.line });
+    }
+
     fn generateElement(self: *Generator, elem: ast.Element) std.Io.Writer.Error!void {
+        try self.writeSourceLoc(elem.loc);
         // Check if we have any dynamic attributes
         var has_dynamic = false;
         for (elem.attributes) |attr| {
@@ -340,6 +351,7 @@ pub const Generator = struct {
         }
 
         // Closing tag
+        try self.writeSourceLoc(elem.end_loc);
         try self.writeIndent();
         try self.output.writeAll("try writer.writeAll(\"</");
         try self.output.writeAll(elem.tag);
@@ -356,6 +368,7 @@ pub const Generator = struct {
     }
 
     fn generateExpr(self: *Generator, expr: ast.Expr) std.Io.Writer.Error!void {
+        try self.writeSourceLoc(expr.loc);
         switch (expr.content) {
             .zig_code => |code| {
                 try self.writeIndent();
@@ -430,6 +443,7 @@ pub const Generator = struct {
     }
 
     fn generateComponentCall(self: *Generator, call: ast.ComponentCall) std.Io.Writer.Error!void {
+        try self.writeSourceLoc(call.loc);
         try self.writeIndent();
         try self.output.writeAll("try zt.renderComponent(");
         try self.output.writeAll(call.name);
@@ -447,6 +461,7 @@ pub const Generator = struct {
     }
 
     fn generateIfStmt(self: *Generator, stmt: ast.IfStatement) std.Io.Writer.Error!void {
+        try self.writeSourceLoc(stmt.loc);
         try self.writeIndent();
         try self.output.writeAll("if (");
         try self.output.writeAll(stmt.condition);
@@ -473,6 +488,7 @@ pub const Generator = struct {
     }
 
     fn generateForStmt(self: *Generator, stmt: ast.ForStatement) std.Io.Writer.Error!void {
+        try self.writeSourceLoc(stmt.loc);
         try self.writeIndent();
         try self.output.writeAll("for (");
         try self.output.writeAll(stmt.iterable);
@@ -491,6 +507,7 @@ pub const Generator = struct {
     }
 
     fn generateSwitchStmt(self: *Generator, stmt: ast.SwitchStatement) std.Io.Writer.Error!void {
+        try self.writeSourceLoc(stmt.loc);
         try self.writeIndent();
         try self.output.writeAll("switch (");
         try self.output.writeAll(stmt.value);

@@ -370,6 +370,7 @@ pub const Parser = struct {
     // =========================================================================
 
     fn parseElement(self: *Parser) Error!ast.Element {
+        const loc = self.location();
         if (!self.match("<")) return self.fail("expected '<'", .{});
 
         const tag = try self.parseTagName();
@@ -384,6 +385,7 @@ pub const Parser = struct {
                 .attributes = attributes,
                 .children = &[_]ast.Node{},
                 .self_closing = true,
+                .loc = loc,
             };
         }
 
@@ -395,6 +397,7 @@ pub const Parser = struct {
 
         // Closing tag: </tag>
         self.skipWhitespace();
+        const end_loc = self.location();
         if (!self.match("</")) return self.fail("expected closing tag '</{s}>'", .{tag});
         const closing_tag = try self.parseTagName();
         if (!std.mem.eql(u8, tag, closing_tag)) return self.fail("mismatched closing tag: expected '</{s}>', found '</{s}>'", .{ tag, closing_tag });
@@ -406,6 +409,8 @@ pub const Parser = struct {
             .attributes = attributes,
             .children = children,
             .self_closing = false,
+            .loc = loc,
+            .end_loc = end_loc,
         };
     }
 
@@ -493,6 +498,7 @@ pub const Parser = struct {
     // =========================================================================
 
     fn parseExprBlock(self: *Parser) Error!ast.Expr {
+        const loc = self.location();
         if (!self.match("{")) return self.fail("expected '{{'", .{});
 
         // Check for raw output: {!expr}
@@ -505,7 +511,7 @@ pub const Parser = struct {
         self.skipSpaces();
         if (!self.match("}")) return self.fail("expected '}}' to close expression", .{});
 
-        return .{ .content = content, .raw = is_raw };
+        return .{ .content = content, .raw = is_raw, .loc = loc };
     }
 
     fn parseExprContent(self: *Parser) Error!ast.Expr.Content {
@@ -591,6 +597,7 @@ pub const Parser = struct {
     // =========================================================================
 
     fn parseComponentCall(self: *Parser) Error!ast.ComponentCall {
+        const loc = self.location();
         if (!self.match("@")) return self.fail("expected '@' for component call", .{});
 
         const name = try self.parseDottedIdentifier();
@@ -617,6 +624,7 @@ pub const Parser = struct {
             .name = name,
             .args = args,
             .children = children,
+            .loc = loc,
         };
     }
 
@@ -676,6 +684,7 @@ pub const Parser = struct {
     // =========================================================================
 
     fn parseIfStatement(self: *Parser) Error!ast.IfStatement {
+        const loc = self.location();
         _ = self.match("if");
         self.skipSpaces();
 
@@ -707,6 +716,7 @@ pub const Parser = struct {
             .condition = condition,
             .then_body = then_body,
             .else_body = else_body,
+            .loc = loc,
         };
     }
 
@@ -715,6 +725,7 @@ pub const Parser = struct {
     // =========================================================================
 
     fn parseForStatement(self: *Parser) Error!ast.ForStatement {
+        const loc = self.location();
         _ = self.match("for");
         self.skipSpaces();
 
@@ -747,6 +758,7 @@ pub const Parser = struct {
             .iterable = iterable,
             .captures = captures,
             .body = body,
+            .loc = loc,
         };
     }
 
@@ -755,6 +767,7 @@ pub const Parser = struct {
     // =========================================================================
 
     fn parseSwitchStatement(self: *Parser) Error!ast.SwitchStatement {
+        const loc = self.location();
         _ = self.match("switch");
         self.skipSpaces();
 
@@ -785,6 +798,7 @@ pub const Parser = struct {
         return .{
             .value = value,
             .cases = cases.items,
+            .loc = loc,
         };
     }
 
