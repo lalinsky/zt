@@ -12,8 +12,8 @@ pub fn build(b: *std.Build) void {
     });
 
     // Compile templates (generates .zig next to .zt files)
-    const templates_step = zt.addTemplates(b, &.{
-        "src/templates/hello.zt",
+    const templates_step = zt.addTemplates(b, zt_dep, &.{
+        b.path("src/templates/hello.zt"),
     });
 
     // Create root module

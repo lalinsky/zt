@@ -197,9 +197,9 @@ pub fn build(b: *std.Build) void {
     });
 
     // Compile templates
-    const templates = zt.addTemplates(b, &.{
-        "src/templates/Page.zt",
-        "src/templates/UserCard.zt",
+    const templates = zt.addTemplates(b, zt_dep, &.{
+        b.path("src/templates/Page.zt"),
+        b.path("src/templates/UserCard.zt"),
     });
 
     const exe = b.addExecutable(.{ ... });

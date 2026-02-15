@@ -10,60 +10,68 @@ pub fn main() !void {
     defer std.process.argsFree(allocator, args);
 
     if (args.len < 2) {
-        std.debug.print("Usage: zt-compile <file.zt> [output.zig]\n", .{});
+        std.debug.print("Usage: zt-compile <file.zt>...\n", .{});
         std.process.exit(1);
     }
 
-    const input_path = args[1];
-    const output_path = if (args.len > 2) args[2] else null;
+    for (args[1..]) |input_path| {
+        try compileTemplate(allocator, input_path);
+    }
+}
 
-    // Read source
-    const source = std.fs.cwd().readFileAlloc(allocator, input_path, 10 * 1024 * 1024) catch |err| {
-        std.debug.print("Error reading '{s}': {}\n", .{ input_path, err });
-        std.process.exit(1);
-    };
-    defer allocator.free(source);
-
-    // Parse
+fn compileTemplate(allocator: std.mem.Allocator, input_path: []const u8) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
+    const alloc = arena.allocator();
 
-    var parser = zt.Parser.init(arena.allocator(), source);
+    // Read source
+    const source = std.fs.cwd().readFileAlloc(alloc, input_path, 10 * 1024 * 1024) catch |err| {
+        std.debug.print("Error reading '{s}': {}\n", .{ input_path, err });
+        return error.ReadFailed;
+    };
+
+    // Parse
+    var parser = zt.Parser.init(alloc, source);
     const file = parser.parseFile() catch |err| {
         if (parser.err) |e| {
             std.debug.print("{s}:{d}:{d}: {s}\n", .{ input_path, e.line, e.col, e.msg });
         } else {
             std.debug.print("{s}: parse error: {}\n", .{ input_path, err });
         }
-        std.process.exit(1);
+        return error.ParseFailed;
     };
 
     // Generate
-    var output: std.Io.Writer.Allocating = .init(allocator);
-    defer output.deinit();
-
-    output.writer.writeAll("// Auto-generated from ") catch unreachable;
-    output.writer.writeAll(std.fs.path.basename(input_path)) catch unreachable;
-    output.writer.writeAll(" - do not edit\n") catch unreachable;
-    output.writer.writeAll("const std = @import(\"std\");\n") catch unreachable;
-    output.writer.writeAll("const zt = @import(\"zt\");\n\n") catch unreachable;
+    var output: std.Io.Writer.Allocating = .init(alloc);
+    try output.writer.writeAll("// Auto-generated from ");
+    try output.writer.writeAll(std.fs.path.basename(input_path));
+    try output.writer.writeAll(" - do not edit\n");
+    try output.writer.writeAll("const std = @import(\"std\");\n");
+    try output.writer.writeAll("const zt = @import(\"zt\");\n\n");
 
     var gen = zt.Generator.init(&output.writer);
     gen.generateFile(file) catch |err| {
         std.debug.print("Error generating code: {}\n", .{err});
-        std.process.exit(1);
+        return error.GenerateFailed;
     };
 
     const generated = output.writer.buffer[0..output.writer.end];
 
-    // Write output
-    if (output_path) |path| {
-        std.fs.cwd().writeFile(.{ .sub_path = path, .data = generated }) catch |err| {
-            std.debug.print("Error writing '{s}': {}\n", .{ path, err });
-            std.process.exit(1);
-        };
-        std.debug.print("Wrote {s}\n", .{path});
+    // Write output: foo.zt -> foo.zig
+    const output_path = try replaceExtension(alloc, input_path, ".zig");
+    std.fs.cwd().writeFile(.{ .sub_path = output_path, .data = generated }) catch |err| {
+        std.debug.print("Error writing '{s}': {}\n", .{ output_path, err });
+        return error.WriteFailed;
+    };
+    std.debug.print("Wrote {s}\n", .{output_path});
+}
+
+fn replaceExtension(allocator: std.mem.Allocator, path: []const u8, new_ext: []const u8) ![]const u8 {
+    const stem = std.fs.path.stem(path);
+    const dir = std.fs.path.dirname(path) orelse "";
+    if (dir.len > 0) {
+        return std.fmt.allocPrint(allocator, "{s}/{s}{s}", .{ dir, stem, new_ext });
     } else {
-        std.fs.File.stdout().writeAll(generated) catch {};
+        return std.fmt.allocPrint(allocator, "{s}{s}", .{ stem, new_ext });
     }
 }

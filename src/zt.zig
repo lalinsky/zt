@@ -1,3 +1,6 @@
+const std = @import("std");
+
+// Compiler for the template language
 pub const ast = @import("ast.zig");
 pub const Parser = @import("parser.zig").Parser;
 pub const Generator = @import("codegen.zig").Generator;
@@ -10,7 +13,5 @@ pub const writeAttr = @import("runtime.zig").writeAttr;
 pub const renderComponent = @import("runtime.zig").renderComponent;
 
 test {
-    _ = @import("parser.zig");
-    _ = @import("codegen.zig");
-    _ = @import("runtime.zig");
+    std.testing.refAllDecls(@This());
 }
