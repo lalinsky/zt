@@ -292,7 +292,7 @@ pub const Parser = struct {
     /// Parse `{ nodes }` - braced block of nodes
     fn parseBracedNodes(self: *Parser) Error![]const ast.Node {
         if (!self.match("{")) return self.fail("expected '{{'", .{});
-        const nodes = try self.parseNodes();
+        const nodes = try self.parseNodes(true); // at_block_start = true
         self.skipWhitespace();
         if (!self.match("}")) return self.fail("expected '}}'", .{});
         return nodes;
@@ -302,16 +302,25 @@ pub const Parser = struct {
     // Node parsing - the main recursive descent
     // =========================================================================
 
-    fn parseNodes(self: *Parser) Error![]const ast.Node {
+    fn parseNodes(self: *Parser, at_block_start: bool) Error![]const ast.Node {
         var nodes: std.ArrayList(ast.Node) = .empty;
+        var is_first = at_block_start;
 
         while (true) {
+            const pos_before = self.pos;
             self.skipWhitespace();
             const c = self.peek() orelse break;
             if (c == '}' or self.check("</")) break;
 
-            if (try self.parseNode()) |node| {
+            // Block-level constructs (for/if/switch/@) allowed at block start or after newline
+            const has_newline = for (self.source[pos_before..self.pos]) |ch| {
+                if (ch == '\n') break true;
+            } else false;
+            const allow_block_constructs = is_first or has_newline;
+
+            if (try self.parseNode(allow_block_constructs)) |node| {
                 try nodes.append(self.allocator, node);
+                is_first = false;
             } else {
                 break;
             }
@@ -320,22 +329,26 @@ pub const Parser = struct {
         return nodes.items;
     }
 
-    fn parseNode(self: *Parser) Error!?ast.Node {
+    fn parseNode(self: *Parser, allow_block_constructs: bool) Error!?ast.Node {
         const c = self.peek() orelse return null;
 
         if (c == '<') {
             if (self.check("</")) return null;
             if (self.check("<!")) {
                 try self.skipComment();
-                return self.parseNode();
+                return self.parseNode(allow_block_constructs);
             }
             return .{ .element = try self.parseElement() };
         }
-        if (c == '@') return .{ .component_call = try self.parseComponentCall() };
         if (c == '{') return .{ .expr = try self.parseExprBlock() };
-        if (self.check("for ")) return .{ .for_stmt = try self.parseForStatement() };
-        if (self.check("if ")) return .{ .if_stmt = try self.parseIfStatement() };
-        if (self.check("switch ")) return .{ .switch_stmt = try self.parseSwitchStatement() };
+
+        // Block-level constructs only allowed at block start or after newline
+        if (allow_block_constructs) {
+            if (c == '@') return .{ .component_call = try self.parseComponentCall() };
+            if (self.check("for ")) return .{ .for_stmt = try self.parseForStatement() };
+            if (self.check("if ")) return .{ .if_stmt = try self.parseIfStatement() };
+            if (self.check("switch ")) return .{ .switch_stmt = try self.parseSwitchStatement() };
+        }
 
         return .{ .text = try self.parseText() };
     }
@@ -367,8 +380,8 @@ pub const Parser = struct {
         // Opening tag: <tag>
         if (!self.match(">")) return self.fail("expected '>' to close opening tag", .{});
 
-        // Parse children
-        const children = try self.parseNodes();
+        // Parse children (not at block start, but newlines still enable constructs)
+        const children = try self.parseNodes(false);
 
         // Closing tag: </tag>
         self.skipWhitespace();
@@ -599,10 +612,11 @@ pub const Parser = struct {
         }
 
         // Optional children block: @Name(args) { ... }
-        self.skipWhitespace();
+        // Only skip spaces (not newlines) for lookahead - preserve newlines for block detection
+        self.skipSpaces();
         var children: []const ast.Node = &.{};
         if (self.match("{")) {
-            children = try self.parseNodes();
+            children = try self.parseNodes(true); // at_block_start = true
             self.skipWhitespace();
             if (!self.match("}")) return self.fail("expected '}}' to close component children block", .{});
         }
