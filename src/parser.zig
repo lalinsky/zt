@@ -753,7 +753,7 @@ pub const Parser = struct {
     }
 
     // =========================================================================
-    // Inline switch: switch (expr) .case => branch, ...
+    // Inline switch: switch (expr) { .case => branch, ... }
     // =========================================================================
 
     fn parseSwitchExpr(self: *Parser) Error!ast.SwitchExpr {
@@ -761,6 +761,8 @@ pub const Parser = struct {
         self.skipSpaces();
         const value = try self.parseParenExpr();
         self.skipSpaces();
+
+        if (!self.match("{")) return self.fail("expected '{{' after switch expression", .{});
 
         var cases: std.ArrayList(ast.SwitchBranch) = .empty;
         while (true) {
@@ -770,6 +772,9 @@ pub const Parser = struct {
             self.skipSpaces();
             if (!self.match(",")) break;
         }
+
+        self.skipSpaces();
+        if (!self.match("}")) return self.fail("expected '}}' to close switch", .{});
 
         return .{ .value = value, .cases = cases.items };
     }
@@ -1643,7 +1648,7 @@ test "parse inline switch" {
 
     const source =
         \\templ Badge(role: Role) {
-        \\    {switch (role) .admin => <span>Admin</span>, .user => <span>User</span>, else => <span>Guest</span>}
+        \\    {switch (role) { .admin => <span>Admin</span>, .user => <span>User</span>, else => <span>Guest</span> }}
         \\}
     ;
 

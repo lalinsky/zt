@@ -83,3 +83,33 @@ pub templ run(s: []const u8) {
 }
 ''', args='.{"  hi  "}')
     assert result == '<span>hi</span>'
+
+
+# Control flow in attributes
+
+def test_attr_if_else(zt):
+    result = zt.run(
+        'pub templ run(x: bool) { <div class={if (x) "active" else "inactive"}></div> }',
+        args='.{true}',
+    )
+    assert result == '<div class="active"></div>'
+
+
+def test_attr_if_else_false(zt):
+    result = zt.run(
+        'pub templ run(x: bool) { <div class={if (x) "active" else "inactive"}></div> }',
+        args='.{false}',
+    )
+    assert result == '<div class="inactive"></div>'
+
+
+def test_attr_switch(zt):
+    result = zt.run(
+        '''const Status = enum { active, pending, inactive };
+
+        pub templ run(s: Status) {
+            <div class={switch (s) { .active => "green", .pending => "yellow", else => "gray" }}></div>
+        }''',
+        args='.{.pending}',
+    )
+    assert result == '<div class="yellow"></div>'

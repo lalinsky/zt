@@ -188,7 +188,7 @@ def test_inline_switch(zt):
         '''const Role = enum { admin, user, guest };
 
         pub templ run(r: Role) {
-            {switch (r) .admin => <b>Admin</b>, .user => <i>User</i>, else => <span>Guest</span>}
+            {switch (r) { .admin => <b>Admin</b>, .user => <i>User</i>, else => <span>Guest</span> }}
         }''',
         args='.{.user}',
     )
@@ -200,7 +200,7 @@ def test_inline_switch_else(zt):
         '''const Role = enum { admin, user, guest };
 
         pub templ run(r: Role) {
-            {switch (r) .admin => <b>Admin</b>, else => <span>Other</span>}
+            {switch (r) { .admin => <b>Admin</b>, else => <span>Other</span> }}
         }''',
         args='.{.guest}',
     )
@@ -212,7 +212,7 @@ def test_inline_switch_zig_expr(zt):
         '''const Status = enum { active, pending, inactive };
 
         pub templ run(s: Status) {
-            {switch (s) .active => "Active", .pending => "Pending", else => "Other"}
+            {switch (s) { .active => "Active", .pending => "Pending", else => "Other" }}
         }''',
         args='.{.active}',
     )
@@ -224,8 +224,23 @@ def test_switch_capture_zig_expr(zt):
         '''const Value = union(enum) { num: i32, text: []const u8 };
 
         pub templ run(v: Value) {
-            {switch (v) .num => |n| n * 2, .text => |t| t.len}
+            {switch (v) { .num => |n| n * 2, .text => |t| t.len }}
         }''',
         args='.{.{ .num = 21 }}',
+    )
+    assert result == '42'
+
+
+def test_inline_switch_func_call(zt):
+    """Switch branch with function call containing commas."""
+    result = zt.run(
+        '''const Status = enum { active, pending };
+
+        fn add(a: i32, b: i32) i32 { return a + b; }
+
+        pub templ run(s: Status) {
+            {switch (s) { .active => add(20, 22), .pending => add(1, 2) }}
+        }''',
+        args='.{.active}',
     )
     assert result == '42'
