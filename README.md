@@ -1,5 +1,7 @@
 # Zig Templating
 
+*This is still an experimental project. Feedback is welcome, but use with caution.*
+
 Small HTML templating language that compiles to Zig at build-time.
 Inspired by [Templ], [Zeix] and [JSX].
 
