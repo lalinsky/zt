@@ -1,6 +1,24 @@
 const std = @import("std");
 const ast = @import("ast.zig");
 
+/// HTML void elements that cannot have children and must not have a closing tag.
+/// https://html.spec.whatwg.org/multipage/syntax.html#void-elements
+const void_elements = std.StaticStringMap(void).initComptime(.{
+    .{ "area", {} },
+    .{ "base", {} },
+    .{ "br", {} },
+    .{ "col", {} },
+    .{ "embed", {} },
+    .{ "hr", {} },
+    .{ "img", {} },
+    .{ "input", {} },
+    .{ "link", {} },
+    .{ "meta", {} },
+    .{ "source", {} },
+    .{ "track", {} },
+    .{ "wbr", {} },
+});
+
 pub const Generator = struct {
     output: *std.Io.Writer,
     indent: usize,
@@ -300,8 +318,13 @@ pub const Generator = struct {
                 }
             }
 
-            if (elem.self_closing) {
-                try self.output.writeAll("/>\");\n");
+            const is_void = void_elements.has(elem.tag);
+            if (is_void or elem.self_closing) {
+                if (is_void) {
+                    try self.output.writeAll(">\");\n");
+                } else {
+                    try self.output.writeAll("/>\");\n");
+                }
                 return;
             }
             try self.output.writeAll(">\");\n");
@@ -338,8 +361,13 @@ pub const Generator = struct {
 
             // Close opening tag
             try self.writeIndent();
-            if (elem.self_closing) {
-                try self.output.writeAll("try writer.writeAll(\"/>\");\n");
+            const is_void = void_elements.has(elem.tag);
+            if (is_void or elem.self_closing) {
+                if (is_void) {
+                    try self.output.writeAll("try writer.writeAll(\">\");\n");
+                } else {
+                    try self.output.writeAll("try writer.writeAll(\"/>\");\n");
+                }
                 return;
             }
             try self.output.writeAll("try writer.writeAll(\">\");\n");
@@ -1023,4 +1051,39 @@ test "generate else if chain" {
     const result = output.writer.buffer[0..output.writer.end];
     // Should generate "} else if (" not "} else {\n    if ("
     try std.testing.expect(std.mem.indexOf(u8, result, "} else if (x == 2)") != null);
+}
+
+test "generate void elements without closing slash" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const parser = @import("parser.zig");
+
+    const source =
+        \\templ test() {
+        \\    <head>
+        \\        <meta name="viewport"/>
+        \\    </head>
+        \\    <br/>
+        \\}
+    ;
+
+    var p = parser.Parser.init(arena.allocator(), source);
+    const template = try p.parseTemplate();
+
+    var output: std.Io.Writer.Allocating = .init(arena.allocator());
+    var gen = Generator.init(&output.writer);
+    try gen.generate(template);
+
+    const result = output.writer.buffer[0..output.writer.end];
+    // Void elements should output > not />
+    try std.testing.expect(std.mem.indexOf(u8, result, "<meta name=") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "<br>") != null);
+    // Should NOT have /> for void elements
+    try std.testing.expect(std.mem.indexOf(u8, result, "<br/>") == null);
+    // Should NOT have closing tags for void elements
+    try std.testing.expect(std.mem.indexOf(u8, result, "</meta>") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "</br>") == null);
+    // But regular elements should still have closing tags
+    try std.testing.expect(std.mem.indexOf(u8, result, "</head>") != null);
 }
