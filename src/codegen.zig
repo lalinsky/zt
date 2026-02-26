@@ -419,7 +419,13 @@ pub const Generator = struct {
         try self.writeIndent();
         try self.output.writeAll("if (");
         try self.output.writeAll(if_expr.condition);
-        try self.output.writeAll(") {\n");
+        try self.output.writeAll(")");
+        if (if_expr.capture) |cap| {
+            try self.output.writeAll(" |");
+            try self.output.writeAll(cap);
+            try self.output.writeAll("|");
+        }
+        try self.output.writeAll(" {\n");
 
         self.indent += 1;
         try self.generateBranch(if_expr.then_branch, raw);
@@ -494,7 +500,13 @@ pub const Generator = struct {
         try self.writeIndent();
         try self.output.writeAll("if (");
         try self.output.writeAll(stmt.condition);
-        try self.output.writeAll(") {\n");
+        try self.output.writeAll(")");
+        if (stmt.capture) |cap| {
+            try self.output.writeAll(" |");
+            try self.output.writeAll(cap);
+            try self.output.writeAll("|");
+        }
+        try self.output.writeAll(" {\n");
 
         self.indent += 1;
         for (stmt.then_body) |node| {
@@ -527,7 +539,13 @@ pub const Generator = struct {
     fn generateIfStmtInline(self: *Generator, stmt: ast.IfStatement) std.Io.Writer.Error!void {
         try self.output.writeAll("if (");
         try self.output.writeAll(stmt.condition);
-        try self.output.writeAll(") {\n");
+        try self.output.writeAll(")");
+        if (stmt.capture) |cap| {
+            try self.output.writeAll(" |");
+            try self.output.writeAll(cap);
+            try self.output.writeAll("|");
+        }
+        try self.output.writeAll(" {\n");
 
         self.indent += 1;
         for (stmt.then_body) |node| {

@@ -69,8 +69,10 @@ pub const Expr = struct {
 };
 
 /// Inline if: {if (cond) <span>yes</span> else <span>no</span>}
+/// With capture: {if (opt) |val| <span>{val}</span>}
 pub const IfExpr = struct {
     condition: []const u8,
+    capture: ?[]const u8 = null,
     then_branch: Branch,
     else_branch: ?Branch,
 };
@@ -99,8 +101,10 @@ pub const ComponentCall = struct {
 };
 
 /// Block-level: if (cond) { ... } else { ... }
+/// With capture: if (opt) |val| { ... }
 pub const IfStatement = struct {
     condition: []const u8,
+    capture: ?[]const u8 = null,
     then_body: []const Node,
     else_body: ?[]const Node,
     loc: Location = .{},

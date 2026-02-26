@@ -32,6 +32,51 @@ def test_inline_if_zig_expr(zt):
     assert result == 'yes'
 
 
+def test_inline_if_capture(zt):
+    """Inline if with optional capture."""
+    result = zt.run(
+        'pub templ run(x: ?[]const u8) { {if (x) |val| <b>{val}</b>} }',
+        args='.{"hi"}',
+    )
+    assert result == '<b>hi</b>'
+
+
+def test_inline_if_capture_null(zt):
+    """Inline if with optional capture, null case."""
+    result = zt.run(
+        'pub templ run(x: ?[]const u8) { {if (x) |val| <b>{val}</b>} }',
+        args='.{null}',
+    )
+    assert result == ''
+
+
+def test_inline_if_capture_else(zt):
+    """Inline if with optional capture and else."""
+    result = zt.run(
+        'pub templ run(x: ?[]const u8) { {if (x) |val| <b>{val}</b> else <i>none</i>} }',
+        args='.{"test"}',
+    )
+    assert result == '<b>test</b>'
+
+
+def test_inline_if_capture_else_null(zt):
+    """Inline if with optional capture and else, null case."""
+    result = zt.run(
+        'pub templ run(x: ?[]const u8) { {if (x) |val| <b>{val}</b> else <i>none</i>} }',
+        args='.{null}',
+    )
+    assert result == '<i>none</i>'
+
+
+def test_inline_if_capture_zig_expr(zt):
+    """Inline if with optional capture returning Zig expression."""
+    result = zt.run(
+        'pub templ run(x: ?[]const u8) { {if (x) |val| val else "default"} }',
+        args='.{"value"}',
+    )
+    assert result == 'value'
+
+
 def test_inline_for(zt):
     result = zt.run(
         'pub templ run(items: []const []const u8) { {for (items) |x| <i>{x}</i>} }',
@@ -80,6 +125,62 @@ def test_block_else_if(zt):
         args='.{2}',
     )
     assert result == '<span>two</span>'
+
+
+def test_block_if_capture(zt):
+    """Block-level if with optional capture."""
+    result = zt.run(
+        '''pub templ run(x: ?[]const u8) {
+            if (x) |val| {
+                <span>{val}</span>
+            }
+        }''',
+        args='.{"hello"}',
+    )
+    assert result == '<span>hello</span>'
+
+
+def test_block_if_capture_null(zt):
+    """Block-level if with optional capture, null case."""
+    result = zt.run(
+        '''pub templ run(x: ?[]const u8) {
+            if (x) |val| {
+                <span>{val}</span>
+            }
+        }''',
+        args='.{null}',
+    )
+    assert result == ''
+
+
+def test_block_if_capture_else(zt):
+    """Block-level if with optional capture and else branch."""
+    result = zt.run(
+        '''pub templ run(x: ?[]const u8) {
+            if (x) |val| {
+                <span>{val}</span>
+            } else {
+                <span>none</span>
+            }
+        }''',
+        args='.{"world"}',
+    )
+    assert result == '<span>world</span>'
+
+
+def test_block_if_capture_else_null(zt):
+    """Block-level if with optional capture and else branch, null case."""
+    result = zt.run(
+        '''pub templ run(x: ?[]const u8) {
+            if (x) |val| {
+                <span>{val}</span>
+            } else {
+                <span>none</span>
+            }
+        }''',
+        args='.{null}',
+    )
+    assert result == '<span>none</span>'
 
 
 def test_consecutive_if_and_for(zt):
