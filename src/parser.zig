@@ -542,6 +542,14 @@ pub const Parser = struct {
         self.skipSpaces();
         const condition = try self.parseParenExpr();
         self.skipSpaces();
+
+        // Optional capture: |val|
+        const capture: ?[]const u8 = if (self.peek() == @as(u8, '|'))
+            try self.parseCaptures()
+        else
+            null;
+
+        self.skipSpaces();
         const then_branch = try self.parseBranch();
         self.skipSpaces();
         const else_branch: ?ast.Branch = if (self.match("else")) blk: {
@@ -549,7 +557,7 @@ pub const Parser = struct {
             break :blk try self.parseBranch();
         } else null;
 
-        return .{ .condition = condition, .then_branch = then_branch, .else_branch = else_branch };
+        return .{ .condition = condition, .capture = capture, .then_branch = then_branch, .else_branch = else_branch };
     }
 
     fn parseBranch(self: *Parser) Error!ast.Branch {
@@ -673,6 +681,14 @@ pub const Parser = struct {
         self.skipSpaces();
 
         const condition = try self.parseParenExpr();
+        self.skipSpaces();
+
+        // Optional capture: |val|
+        const capture: ?[]const u8 = if (self.peek() == @as(u8, '|'))
+            try self.parseCaptures()
+        else
+            null;
+
         self.skipWhitespace();
         const then_body = try self.parseBracedNodes();
 
@@ -692,7 +708,7 @@ pub const Parser = struct {
             break :blk null;
         };
 
-        return .{ .condition = condition, .then_body = then_body, .else_body = else_body, .loc = loc };
+        return .{ .condition = condition, .capture = capture, .then_body = then_body, .else_body = else_body, .loc = loc };
     }
 
     // =========================================================================
@@ -1042,9 +1058,12 @@ test "parse inline if with zig code branches" {
     const if_expr = template.body[0].expr.content.if_expr;
     try std.testing.expectEqualStrings("value", if_expr.condition);
 
-    // Then branch is zig code
+    // Capture is parsed
+    try std.testing.expectEqualStrings("v", if_expr.capture.?);
+
+    // Then branch is zig code (the captured variable)
     try std.testing.expect(if_expr.then_branch == .zig_code);
-    try std.testing.expectEqualStrings("|v| v", if_expr.then_branch.zig_code);
+    try std.testing.expectEqualStrings("v", if_expr.then_branch.zig_code);
 
     // Else branch is zig code
     try std.testing.expect(if_expr.else_branch.? == .zig_code);
