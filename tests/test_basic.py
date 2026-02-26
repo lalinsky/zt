@@ -113,3 +113,199 @@ def test_attr_switch(zt):
         args='.{.pending}',
     )
     assert result == '<div class="yellow"></div>'
+
+
+# Nested braces in expressions
+
+def test_expr_array_access(zt):
+    result = zt.run(
+        'pub templ run(arr: []const u8) { <span>{arr[0]}</span> }',
+        args='.{"hello"}',
+    )
+    assert result == '<span>104</span>'  # 'h' = 104
+
+
+def test_expr_struct_literal(zt):
+    result = zt.run('''
+fn getX(s: struct { x: i32 }) i32 {
+    return s.x;
+}
+
+pub templ run() {
+    <span>{getX(.{ .x = 42 })}</span>
+}
+''')
+    assert result == '<span>42</span>'
+
+
+def test_expr_nested_struct_literal(zt):
+    result = zt.run('''
+fn getInnerX(s: struct { inner: struct { x: i32 } }) i32 {
+    return s.inner.x;
+}
+
+pub templ run() {
+    <span>{getInnerX(.{ .inner = .{ .x = 99 } })}</span>
+}
+''')
+    assert result == '<span>99</span>'
+
+
+def test_attr_nested_braces(zt):
+    result = zt.run('''
+fn getClass(opts: struct { primary: bool }) []const u8 {
+    return if (opts.primary) "btn-primary" else "btn";
+}
+
+pub templ run() {
+    <div class={getClass(.{ .primary = true })}></div>
+}
+''')
+    assert result == '<div class="btn-primary"></div>'
+
+
+def test_expr_string_with_braces(zt):
+    result = zt.run(
+        'pub templ run() { <span>{"{"}</span><span>{"}"}</span> }',
+    )
+    assert result == '<span>{</span><span>}</span>'
+
+
+def test_expr_chained_field_access(zt):
+    result = zt.run('''
+const Inner = struct { value: i32 };
+const Outer = struct { inner: Inner };
+
+pub templ run(o: Outer) {
+    <span>{o.inner.value}</span>
+}
+''', args='.{.{ .inner = .{ .value = 42 } }}')
+    assert result == '<span>42</span>'
+
+
+def test_expr_multiple_args(zt):
+    result = zt.run('''
+fn add(a: i32, b: i32, c: i32) i32 {
+    return a + b + c;
+}
+
+pub templ run() {
+    <span>{add(1, 2, 3)}</span>
+}
+''')
+    assert result == '<span>6</span>'
+
+
+def test_expr_arithmetic(zt):
+    result = zt.run(
+        'pub templ run(x: i32) { <span>{x * 2 + 10}</span> }',
+        args='.{16}',
+    )
+    assert result == '<span>42</span>'
+
+
+def test_expr_comparison(zt):
+    result = zt.run(
+        'pub templ run(x: i32) { <span>{x > 10}</span> }',
+        args='.{42}',
+    )
+    assert result == '<span>true</span>'
+
+
+def test_expr_slice(zt):
+    result = zt.run(
+        'pub templ run(s: []const u8) { <span>{s[0..5]}</span> }',
+        args='.{"hello world"}',
+    )
+    assert result == '<span>hello</span>'
+
+
+def test_expr_orelse(zt):
+    result = zt.run(
+        'pub templ run(x: ?[]const u8) { <span>{x orelse "default"}</span> }',
+        args='.{null}',
+    )
+    assert result == '<span>default</span>'
+
+
+def test_expr_orelse_present(zt):
+    result = zt.run(
+        'pub templ run(x: ?[]const u8) { <span>{x orelse "default"}</span> }',
+        args='.{"value"}',
+    )
+    assert result == '<span>value</span>'
+
+
+def test_expr_optional_unwrap(zt):
+    result = zt.run(
+        'pub templ run(x: ?i32) { <span>{x.?}</span> }',
+        args='.{42}',
+    )
+    assert result == '<span>42</span>'
+
+
+def test_expr_builtin(zt):
+    result = zt.run(
+        'pub templ run(x: i32) { <span>{@abs(x)}</span> }',
+        args='.{-42}',
+    )
+    assert result == '<span>42</span>'
+
+
+def test_expr_parenthesized(zt):
+    result = zt.run(
+        'pub templ run(x: i32) { <span>{(x + 1) * 2}</span> }',
+        args='.{20}',
+    )
+    assert result == '<span>42</span>'
+
+
+def test_expr_number_literal(zt):
+    result = zt.run('pub templ run() { <span>{42}</span> }')
+    assert result == '<span>42</span>'
+
+
+def test_expr_string_literal(zt):
+    result = zt.run('pub templ run() { <span>{"hello"}</span> }')
+    assert result == '<span>hello</span>'
+
+
+def test_expr_bool_literal(zt):
+    result = zt.run('pub templ run() { <span>{true}</span><span>{false}</span> }')
+    assert result == '<span>true</span><span>false</span>'
+
+
+def test_expr_interspersed_with_text(zt):
+    result = zt.run(
+        'pub templ run(a: i32, b: i32) { <span>{a} + {b} = {a + b}</span> }',
+        args='.{2, 3}',
+    )
+    assert result == '<span>2 + 3 = 5</span>'
+
+
+def test_expr_multiline(zt):
+    result = zt.run('''
+pub templ run(x: i32) {
+    <span>{
+        x * 2
+    }</span>
+}
+''', args='.{21}')
+    assert result == '<span>42</span>'
+
+
+def test_expr_adjacent(zt):
+    result = zt.run(
+        'pub templ run(a: []const u8, b: []const u8) { <span>{a}{b}</span> }',
+        args='.{"hello", "world"}',
+    )
+    assert result == '<span>helloworld</span>'
+
+
+def test_expr_with_trailing_text(zt):
+    """Regression test for https://github.com/lalinsky/zt/issues/4"""
+    result = zt.run(
+        'pub templ run(title: []const u8) { <header>{title} | test</header> }',
+        args='.{"Ramen"}',
+    )
+    assert result == '<header>Ramen | test</header>'
