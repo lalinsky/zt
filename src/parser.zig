@@ -302,25 +302,29 @@ pub const Parser = struct {
     // Node parsing - the main recursive descent
     // =========================================================================
 
-    fn parseNodes(self: *Parser, at_block_start: bool) Error![]const ast.Node {
+    fn parseNodes(self: *Parser, block_level: bool) Error![]const ast.Node {
         var nodes: std.ArrayList(ast.Node) = .empty;
-        var is_first = at_block_start;
+        var in_block_context = block_level;
 
         while (true) {
-            const pos_before = self.pos;
-            self.skipWhitespace();
             const c = self.peek() orelse break;
             if (c == '}' or self.check("</")) break;
 
-            // Block-level constructs (for/if/switch/@) allowed at block start or after newline
-            const has_newline = for (self.source[pos_before..self.pos]) |ch| {
-                if (ch == '\n') break true;
-            } else false;
-            const allow_block_constructs = is_first or has_newline;
+            // In block context, skip whitespace (indentation)
+            // In inline context, check if we hit a newline -> switch to block context
+            if (in_block_context) {
+                self.skipWhitespace();
+                if (self.peek() == null or self.peek() == '}' or self.check("</")) break;
+            } else if (c == '\n' or c == '\r') {
+                // Newline switches us to block context
+                self.skipWhitespace();
+                in_block_context = true;
+                if (self.peek() == null or self.peek() == '}' or self.check("</")) break;
+            }
+            // Otherwise inline: don't skip whitespace, it's content
 
-            if (try self.parseNode(allow_block_constructs)) |node| {
+            if (try self.parseNode(in_block_context)) |node| {
                 try nodes.append(self.allocator, node);
-                is_first = false;
             } else {
                 break;
             }
