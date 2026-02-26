@@ -672,6 +672,7 @@ pub const Parser = struct {
         self.skipWhitespace();
         const then_body = try self.parseBracedNodes();
 
+        const pos_after_then = self.pos;
         self.skipWhitespace();
         const else_body: ?[]const ast.Node = if (self.match("else")) blk: {
             self.skipWhitespace();
@@ -682,7 +683,10 @@ pub const Parser = struct {
                 break :blk nodes;
             }
             break :blk try self.parseBracedNodes();
-        } else null;
+        } else blk: {
+            self.pos = pos_after_then;
+            break :blk null;
+        };
 
         return .{ .condition = condition, .then_body = then_body, .else_body = else_body, .loc = loc };
     }

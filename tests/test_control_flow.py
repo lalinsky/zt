@@ -82,6 +82,74 @@ def test_block_else_if(zt):
     assert result == '<span>two</span>'
 
 
+def test_consecutive_if_and_for(zt):
+    """Two block-level constructs in sequence (issue #1)."""
+    result = zt.run(
+        '''pub templ run(items: []const []const u8) {
+            if (items.len == 0) {
+                <p>No items</p>
+            }
+            for (items) |item| {
+                <article>
+                    <header>{item}</header>
+                </article>
+            }
+        }''',
+        args='.{&[_][]const u8{"a", "b"}}',
+    )
+    assert result == '<article><header>a</header></article><article><header>b</header></article>'
+
+
+def test_consecutive_if_and_for_empty(zt):
+    """Two block-level constructs in sequence, empty case (issue #1)."""
+    result = zt.run(
+        '''pub templ run(items: []const []const u8) {
+            if (items.len == 0) {
+                <p>No items</p>
+            }
+            for (items) |item| {
+                <article>
+                    <header>{item}</header>
+                </article>
+            }
+        }''',
+        args='.{&[_][]const u8{}}',
+    )
+    assert result == '<p>No items</p>'
+
+
+def test_consecutive_ifs(zt):
+    """Two consecutive if blocks (issue #1)."""
+    result = zt.run(
+        '''pub templ run(a: bool, b: bool) {
+            if (a) {
+                <p>A</p>
+            }
+            if (b) {
+                <p>B</p>
+            }
+        }''',
+        args='.{true, true}',
+    )
+    assert result == '<p>A</p><p>B</p>'
+
+
+def test_consecutive_fors(zt):
+    """Two consecutive for blocks (issue #1)."""
+    result = zt.run(
+        '''pub templ run(a: []const []const u8, b: []const []const u8) {
+            for (a) |x| {
+                <p>{x}</p>
+            }
+            for (b) |y| {
+                <span>{y}</span>
+            }
+        }''',
+        args='.{&[_][]const u8{"a", "b"}, &[_][]const u8{"c", "d"}}',
+    )
+    assert result == '<p>a</p><p>b</p><span>c</span><span>d</span>'
+
+
 def test_block_for(zt):
     result = zt.run(
         '''pub templ run(items: []const []const u8) {
