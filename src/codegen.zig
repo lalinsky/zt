@@ -272,6 +272,7 @@ pub const Generator = struct {
             .for_stmt => |stmt| try self.generateForStmt(stmt),
             .switch_stmt => |stmt| try self.generateSwitchStmt(stmt),
             .component_call => |call| try self.generateComponentCall(call),
+            .doctype => |doctype| try self.generateDoctype(doctype),
         }
     }
 
@@ -393,6 +394,13 @@ pub const Generator = struct {
         try self.output.writeAll("try writer.writeAll(\"");
         try self.writeEscapedForZig(text.content);
         try self.output.writeAll("\");\n");
+    }
+
+    fn generateDoctype(self: *Generator, doctype: ast.Doctype) std.Io.Writer.Error!void {
+        try self.writeIndent();
+        try self.output.writeAll("try writer.writeAll(\"<!DOCTYPE ");
+        try self.output.writeAll(doctype.value);
+        try self.output.writeAll(">\");\n");
     }
 
     fn generateExpr(self: *Generator, expr: ast.Expr) std.Io.Writer.Error!void {

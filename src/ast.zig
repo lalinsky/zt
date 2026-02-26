@@ -27,6 +27,7 @@ pub const Node = union(enum) {
     for_stmt: ForStatement,
     switch_stmt: SwitchStatement,
     component_call: ComponentCall,
+    doctype: Doctype,
 };
 
 pub const Element = struct {
@@ -51,6 +52,10 @@ pub const Attribute = struct {
 
 pub const Text = struct {
     content: []const u8,
+};
+
+pub const Doctype = struct {
+    value: []const u8,
 };
 
 /// Expression block: { ... } or raw: {! ... }
