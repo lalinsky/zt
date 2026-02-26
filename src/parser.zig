@@ -338,9 +338,12 @@ pub const Parser = struct {
 
         if (c == '<') {
             if (self.check("</")) return null;
-            if (self.check("<!")) {
+            if (self.check("<!--")) {
                 try self.skipComment();
                 return self.parseNode(allow_block_constructs);
+            }
+            if (self.checkDoctypeInsensitive()) {
+                return .{ .doctype = try self.parseDoctype() };
             }
             return .{ .element = try self.parseElement() };
         }
@@ -978,13 +981,36 @@ pub const Parser = struct {
                 if (self.advance() == null) return self.fail("unexpected end of file in comment", .{});
             }
             _ = self.match("-->");
-        } else if (self.match("<!")) {
-            // DOCTYPE or similar
-            while (self.peek() != @as(u8, '>')) {
-                if (self.advance() == null) return self.fail("unexpected end of file in doctype", .{});
-            }
+        }
+    }
+
+    fn checkDoctypeInsensitive(self: *Parser) bool {
+        const prefix = "<!DOCTYPE";
+        if (self.pos + prefix.len > self.source.len) return false;
+        const slice = self.source[self.pos .. self.pos + prefix.len];
+        return std.ascii.eqlIgnoreCase(slice, prefix);
+    }
+
+    fn parseDoctype(self: *Parser) Error!ast.Doctype {
+        // Skip "<!DOCTYPE" (case insensitive)
+        self.pos += 9;
+        self.col += 9;
+
+        self.skipSpaces();
+
+        // Parse the doctype value (e.g., "html")
+        const start = self.pos;
+        while (self.peek()) |ch| {
+            if (ch == '>' or std.ascii.isWhitespace(ch)) break;
             _ = self.advance();
         }
+        const value = self.source[start..self.pos];
+
+        self.skipSpaces();
+
+        if (!self.match(">")) return self.fail("expected '>' to close DOCTYPE", .{});
+
+        return .{ .value = value };
     }
 };
 
@@ -1742,4 +1768,43 @@ test "parse escaped vs raw" {
 
     const raw = template.body[1].expr;
     try std.testing.expect(raw.raw);
+}
+
+test "parse doctype" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test() {
+        \\    <!DOCTYPE html>
+        \\    <html></html>
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    try std.testing.expectEqual(@as(usize, 2), template.body.len);
+    try std.testing.expect(template.body[0] == .doctype);
+    try std.testing.expectEqualStrings("html", template.body[0].doctype.value);
+    try std.testing.expect(template.body[1] == .element);
+}
+
+test "parse doctype case insensitive" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test() {
+        \\    <!doctype html>
+        \\    <html></html>
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    try std.testing.expectEqual(@as(usize, 2), template.body.len);
+    try std.testing.expect(template.body[0] == .doctype);
+    try std.testing.expectEqualStrings("html", template.body[0].doctype.value);
 }

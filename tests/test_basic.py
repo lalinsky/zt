@@ -311,3 +311,18 @@ def test_expr_with_trailing_text(zt):
         args='.{"Ramen"}',
     )
     assert result == '<header>Ramen | test</header>'
+
+
+def test_doctype(zt):
+    """Regression test for https://github.com/lalinsky/zt/issues/8"""
+    result = zt.run('pub templ run() { <!DOCTYPE html><html></html> }')
+    assert result == '<!DOCTYPE html><html></html>'
+
+
+def test_doctype_with_whitespace(zt):
+    """DOCTYPE followed by content with whitespace"""
+    result = zt.run('''pub templ run() {
+    <!DOCTYPE html>
+    <html lang="en"></html>
+}''')
+    assert result == '<!DOCTYPE html><html lang="en"></html>'
