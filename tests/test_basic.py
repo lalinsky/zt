@@ -28,13 +28,15 @@ def test_expression_raw(zt):
 
 
 def test_self_closing(zt):
+    # Void elements output without trailing slash (HTML5 compliant)
     result = zt.run('pub templ run() { <br/><input type="text" /> }')
-    assert result == '<br/><input type="text"/>'
+    assert result == '<br><input type="text">'
 
 
 def test_boolean_attr(zt):
+    # Void elements output without trailing slash (HTML5 compliant)
     result = zt.run('pub templ run() { <input disabled checked /> }')
-    assert result == '<input disabled checked/>'
+    assert result == '<input disabled checked>'
 
 
 def test_dynamic_attr(zt):
