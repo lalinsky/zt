@@ -54,9 +54,9 @@ pub fn build(b: *std.Build) void {
 ///
 /// Usage:
 /// ```zig
-/// const zt_dep = b.dependency("zt", .{ .target = target, .optimize = optimize });
+/// const zt_dep = b.dependency("zt", .{});
 /// const templates = zt.addTemplates(b, zt_dep, &.{
-///     b.path("src/templates/hello.zt"),
+///     b.path("src/templates/pages.zt"),
 /// });
 /// exe.step.dependOn(templates);
 /// ```
@@ -66,11 +66,33 @@ pub fn addTemplates(
     template_paths: []const std.Build.LazyPath,
 ) *std.Build.Step {
     const zt_exe = zt_dep.artifact("zt-compile");
-    const run = b.addRunArtifact(zt_exe);
+    const usf = b.addUpdateSourceFiles();
 
     for (template_paths) |template_path| {
+        const run = b.addRunArtifact(zt_exe);
         run.addFileArg(template_path);
+        run.addFileInput(template_path); // Explicit input dependency
+        const basename = getBasename(template_path);
+        const output = run.addOutputFileArg(replaceExtension(b, basename, ".zig"));
+        const output_sub_path = replaceExtension(b, getSubPath(template_path), ".zig");
+        usf.addCopyFileToSource(output, output_sub_path);
     }
 
-    return &run.step;
+    return &usf.step;
+}
+
+fn getSubPath(path: std.Build.LazyPath) []const u8 {
+    return switch (path) {
+        .src_path => |p| p.sub_path,
+        else => @panic("unsupported path type"),
+    };
+}
+
+fn getBasename(path: std.Build.LazyPath) []const u8 {
+    return std.fs.path.basename(getSubPath(path));
+}
+
+fn replaceExtension(b: *std.Build, path: []const u8, new_ext: []const u8) []const u8 {
+    const stem = path[0 .. path.len - std.fs.path.extension(path).len];
+    return std.mem.concat(b.allocator, u8, &.{ stem, new_ext }) catch @panic("OOM");
 }

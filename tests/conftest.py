@@ -8,7 +8,7 @@ import pytest
 
 def setup_workdir(project_root: Path, workdir: Path):
     """Initialize zig project and build files (called once per session)."""
-    zig_cache = project_root / ".zig-cache"
+    zig_cache = workdir / ".zig-cache"
     if zig_cache.exists():
         shutil.rmtree(zig_cache)
 
@@ -71,6 +71,11 @@ class ZtRunner:
         self.workdir = workdir
 
     def run(self, template: str, args: str = ".{}") -> str:
+        # Delete generated .zig file to force regeneration (avoids timestamp precision issues)
+        zig_file = self.workdir / "src/tpl.zig"
+        if zig_file.exists():
+            zig_file.unlink()
+
         # Write template
         zt_file = self.workdir / "src/tpl.zt"
         zt_file.write_text(template)

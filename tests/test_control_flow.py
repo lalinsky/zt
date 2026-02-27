@@ -273,6 +273,62 @@ def test_block_for_index(zt):
     assert result == '<span>0:a</span><span>1:b</span>'
 
 
+def test_inline_for_index(zt):
+    """Inline for loop with index."""
+    result = zt.run(
+        'pub templ run(items: []const []const u8) { {for (items, 0..) |x, i| <span>{i}:{x}</span>} }',
+        args='.{&[_][]const u8{"a", "b"}}',
+    )
+    assert result == '<span>0:a</span><span>1:b</span>'
+
+
+def test_for_empty(zt):
+    """For loop over empty slice produces no output."""
+    result = zt.run(
+        '''pub templ run(items: []const []const u8) {
+            <ul>
+                for (items) |x| { <li>{x}</li> }
+            </ul>
+        }''',
+        args='.{&[_][]const u8{}}',
+    )
+    assert result == '<ul></ul>'
+
+
+def test_nested_for(zt):
+    """Nested for loops."""
+    result = zt.run(
+        '''pub templ run(rows: []const []const i32) {
+            <table>
+                for (rows) |row| {
+                    <tr>
+                        for (row) |cell| {
+                            <td>{cell}</td>
+                        }
+                    </tr>
+                }
+            </table>
+        }''',
+        args='.{&[_][]const i32{&[_]i32{1, 2}, &[_]i32{3, 4}}}',
+    )
+    assert result == '<table><tr><td>1</td><td>2</td></tr><tr><td>3</td><td>4</td></tr></table>'
+
+
+def test_directly_nested_for(zt):
+    """For loop directly inside another for loop without intermediate elements."""
+    result = zt.run(
+        '''pub templ run(rows: []const []const i32) {
+            for (rows) |row| {
+                for (row) |cell| {
+                    <span>{cell}</span>
+                }
+            }
+        }''',
+        args='.{&[_][]const i32{&[_]i32{1, 2}, &[_]i32{3, 4}}}',
+    )
+    assert result == '<span>1</span><span>2</span><span>3</span><span>4</span>'
+
+
 # Switch
 
 def test_switch_basic(zt):
