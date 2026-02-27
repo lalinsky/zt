@@ -961,18 +961,7 @@ pub const Parser = struct {
             if (c == '<' or c == '{' or c == '}') break;
             _ = self.advance();
         }
-        // Only trim leading/trailing newlines, preserve spaces
-        var content = self.source[start..self.pos];
-        // Trim leading newlines/whitespace-only lines
-        while (content.len > 0 and (content[0] == '\n' or content[0] == '\r')) {
-            content = content[1..];
-        }
-        // Trim trailing newlines/whitespace-only lines
-        while (content.len > 0 and (content[content.len - 1] == '\n' or content[content.len - 1] == '\r')) {
-            content = content[0 .. content.len - 1];
-        }
-        // Collapse multiple spaces/tabs to single space, but keep at least one
-        return .{ .content = content };
+        return .{ .content = self.source[start..self.pos] };
     }
 
     fn skipComment(self: *Parser) Error!void {

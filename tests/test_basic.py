@@ -326,3 +326,13 @@ def test_doctype_with_whitespace(zt):
     <html lang="en"></html>
 }''')
     assert result == '<!DOCTYPE html><html lang="en"></html>'
+
+
+def test_literal_text_content(zt):
+    """Literal text inside elements without braces"""
+    result = zt.run('''pub templ run() {
+    <foo>
+      hello world
+    </foo>
+}''')
+    assert result == '<foo>hello world\n    </foo>'
