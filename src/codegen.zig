@@ -465,7 +465,13 @@ pub const Generator = struct {
 
         if (if_expr.else_branch) |else_branch| {
             try self.writeIndent();
-            try self.output.writeAll("} else {\n");
+            try self.output.writeAll("} else");
+            if (if_expr.else_capture) |cap| {
+                try self.output.writeAll(" |");
+                try self.output.writeAll(cap);
+                try self.output.writeAll("|");
+            }
+            try self.output.writeAll(" {\n");
             self.indent += 1;
             try self.generateBranch(else_branch, raw);
             self.indent -= 1;
@@ -547,15 +553,21 @@ pub const Generator = struct {
         self.indent -= 1;
 
         if (stmt.else_body) |else_body| {
-            // Check for else-if chain: single if_stmt node
-            if (else_body.len == 1 and else_body[0] == .if_stmt) {
+            // Check for else-if chain: single if_stmt node (only if no else capture)
+            if (stmt.else_capture == null and else_body.len == 1 and else_body[0] == .if_stmt) {
                 try self.writeIndent();
                 try self.output.writeAll("} else ");
                 try self.generateIfStmtInline(else_body[0].if_stmt);
                 return;
             }
             try self.writeIndent();
-            try self.output.writeAll("} else {\n");
+            try self.output.writeAll("} else");
+            if (stmt.else_capture) |cap| {
+                try self.output.writeAll(" |");
+                try self.output.writeAll(cap);
+                try self.output.writeAll("|");
+            }
+            try self.output.writeAll(" {\n");
             self.indent += 1;
             for (else_body) |node| {
                 try self.generateNode(node);
@@ -586,14 +598,20 @@ pub const Generator = struct {
         self.indent -= 1;
 
         if (stmt.else_body) |else_body| {
-            if (else_body.len == 1 and else_body[0] == .if_stmt) {
+            if (stmt.else_capture == null and else_body.len == 1 and else_body[0] == .if_stmt) {
                 try self.writeIndent();
                 try self.output.writeAll("} else ");
                 try self.generateIfStmtInline(else_body[0].if_stmt);
                 return;
             }
             try self.writeIndent();
-            try self.output.writeAll("} else {\n");
+            try self.output.writeAll("} else");
+            if (stmt.else_capture) |cap| {
+                try self.output.writeAll(" |");
+                try self.output.writeAll(cap);
+                try self.output.writeAll("|");
+            }
+            try self.output.writeAll(" {\n");
             self.indent += 1;
             for (else_body) |node| {
                 try self.generateNode(node);

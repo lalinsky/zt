@@ -611,12 +611,19 @@ pub const Parser = struct {
         self.skipSpaces();
         const then_branch = try self.parseBranch();
         self.skipSpaces();
+
+        var else_capture: ?[]const u8 = null;
         const else_branch: ?ast.Branch = if (self.match("else")) blk: {
             self.skipSpaces();
+            // Optional else capture: else |err|
+            if (self.peek() == @as(u8, '|')) {
+                else_capture = try self.parseCaptures();
+                self.skipSpaces();
+            }
             break :blk try self.parseBranch();
         } else null;
 
-        return .{ .condition = condition, .capture = capture, .then_branch = then_branch, .else_branch = else_branch };
+        return .{ .condition = condition, .capture = capture, .then_branch = then_branch, .else_capture = else_capture, .else_branch = else_branch };
     }
 
     fn parseBranch(self: *Parser) Error!ast.Branch {
@@ -753,8 +760,15 @@ pub const Parser = struct {
 
         const pos_after_then = self.pos;
         self.skipWhitespace();
+
+        var else_capture: ?[]const u8 = null;
         const else_body: ?[]const ast.Node = if (self.match("else")) blk: {
             self.skipWhitespace();
+            // Optional else capture: else |err|
+            if (self.peek() == @as(u8, '|')) {
+                else_capture = try self.parseCaptures();
+                self.skipWhitespace();
+            }
             if (self.check("if ") or self.check("if(")) {
                 const nested_if = try self.parseIfStatement();
                 const nodes = try self.allocator.alloc(ast.Node, 1);
@@ -767,7 +781,7 @@ pub const Parser = struct {
             break :blk null;
         };
 
-        return .{ .condition = condition, .capture = capture, .then_body = then_body, .else_body = else_body, .loc = loc };
+        return .{ .condition = condition, .capture = capture, .then_body = then_body, .else_capture = else_capture, .else_body = else_body, .loc = loc };
     }
 
     // =========================================================================

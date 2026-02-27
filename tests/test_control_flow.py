@@ -77,6 +77,46 @@ def test_inline_if_capture_zig_expr(zt):
     assert result == 'value'
 
 
+def test_inline_if_else_error_capture(zt):
+    """Inline if with error union capture on both branches."""
+    result = zt.run(
+        '''
+const Error = error{Fail};
+
+fn mayFail(fail: bool) Error![]const u8 {
+    if (fail) return error.Fail;
+    return "success";
+}
+
+pub templ run(fail: bool) {
+    {if (mayFail(fail)) |val| <b>{val}</b> else |_| <i>error</i>}
+}
+''',
+        args='.{false}',
+    )
+    assert result == '<b>success</b>'
+
+
+def test_inline_if_else_error_capture_error_case(zt):
+    """Inline if with error union capture, error case."""
+    result = zt.run(
+        '''
+const Error = error{Fail};
+
+fn mayFail(fail: bool) Error![]const u8 {
+    if (fail) return error.Fail;
+    return "success";
+}
+
+pub templ run(fail: bool) {
+    {if (mayFail(fail)) |val| <b>{val}</b> else |_| <i>error</i>}
+}
+''',
+        args='.{true}',
+    )
+    assert result == '<i>error</i>'
+
+
 def test_inline_for(zt):
     result = zt.run(
         'pub templ run(items: []const []const u8) { {for (items) |x| <i>{x}</i>} }',
@@ -181,6 +221,54 @@ def test_block_if_capture_else_null(zt):
         args='.{null}',
     )
     assert result == '<span>none</span>'
+
+
+def test_block_if_else_error_capture(zt):
+    """Block-level if with error union capture on else branch."""
+    result = zt.run(
+        '''
+const Error = error{Fail};
+
+fn mayFail(fail: bool) Error![]const u8 {
+    if (fail) return error.Fail;
+    return "success";
+}
+
+pub templ run(fail: bool) {
+    if (mayFail(fail)) |val| {
+        <b>{val}</b>
+    } else |_| {
+        <i>error</i>
+    }
+}
+''',
+        args='.{false}',
+    )
+    assert result == '<b>success</b>'
+
+
+def test_block_if_else_error_capture_error_case(zt):
+    """Block-level if with error union capture, error case."""
+    result = zt.run(
+        '''
+const Error = error{Fail};
+
+fn mayFail(fail: bool) Error![]const u8 {
+    if (fail) return error.Fail;
+    return "success";
+}
+
+pub templ run(fail: bool) {
+    if (mayFail(fail)) |val| {
+        <b>{val}</b>
+    } else |_| {
+        <i>error</i>
+    }
+}
+''',
+        args='.{true}',
+    )
+    assert result == '<i>error</i>'
 
 
 def test_consecutive_if_and_for(zt):
