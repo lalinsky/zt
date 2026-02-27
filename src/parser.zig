@@ -459,20 +459,75 @@ pub const Parser = struct {
             return .{ .name = name, .value = .{ .dynamic = expr } };
         }
 
-        // Static attribute: attr="value" or attr='value'
+        // Quoted attribute: attr="value" or attr='value'
+        // May contain interpolations: attr="prefix{expr}suffix"
         if (c == '"' or c == '\'') {
             const quote = self.advance().?;
-            const start = self.pos;
+            const value = try self.parseQuotedAttrValue(quote);
+            _ = self.advance(); // consume closing quote
+            return .{ .name = name, .value = value };
+        }
+
+        return self.fail("expected '\"', \"'\", or '{{' for attribute value", .{});
+    }
+
+    /// Parse a quoted attribute value, which may contain interpolations like "prefix{expr}suffix"
+    fn parseQuotedAttrValue(self: *Parser, quote: u8) Error!ast.Attribute.Value {
+        const start = self.pos;
+
+        // First pass: check if there are any interpolations
+        var has_interpolation = false;
+        var scan_pos = self.pos;
+        while (scan_pos < self.source.len) {
+            const ch = self.source[scan_pos];
+            if (ch == quote) break;
+            if (ch == '{') {
+                has_interpolation = true;
+                break;
+            }
+            scan_pos += 1;
+        }
+
+        // Simple case: no interpolations, return static value
+        if (!has_interpolation) {
             while (self.peek()) |ch| {
                 if (ch == quote) break;
                 _ = self.advance();
             }
-            const value = self.source[start..self.pos];
-            _ = self.advance(); // consume closing quote
-            return .{ .name = name, .value = .{ .static = value } };
+            return .{ .static = self.source[start..self.pos] };
         }
 
-        return self.fail("expected '\"', \"'\", or '{{' for attribute value", .{});
+        // Complex case: parse interpolated parts
+        var parts: std.ArrayList(ast.Attribute.InterpolatedPart) = .empty;
+        var text_start = self.pos;
+
+        while (self.peek()) |ch| {
+            if (ch == quote) break;
+
+            if (ch == '{') {
+                // Save any preceding static text
+                if (self.pos > text_start) {
+                    try parts.append(self.allocator, .{ .static = self.source[text_start..self.pos] });
+                }
+
+                // Parse the dynamic expression
+                _ = self.advance(); // consume {
+                const expr = try self.parseZigCodeBalanced(0);
+                if (!self.match("}")) return self.fail("expected '}}' to close interpolation", .{});
+                try parts.append(self.allocator, .{ .dynamic = expr });
+
+                text_start = self.pos;
+            } else {
+                _ = self.advance();
+            }
+        }
+
+        // Save any trailing static text
+        if (self.pos > text_start) {
+            try parts.append(self.allocator, .{ .static = self.source[text_start..self.pos] });
+        }
+
+        return .{ .interpolated = parts.items };
     }
 
     fn parseAttributeName(self: *Parser) Error![]const u8 {

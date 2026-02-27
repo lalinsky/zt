@@ -336,3 +336,45 @@ def test_literal_text_content(zt):
     </foo>
 }''')
     assert result == '<foo>hello world\n    </foo>'
+
+
+def test_attr_string_interpolation(zt):
+    """Regression test for https://github.com/lalinsky/zt/issues/10"""
+    result = zt.run('''
+const Recipe = struct { id: i32, slug: []const u8 };
+
+pub templ run(recipe: Recipe) {
+    <a href="/recipe/{recipe.id}/{recipe.slug}">Link</a>
+}
+''', args='.{.{ .id = 123, .slug = "pizza" }}')
+    assert result == '<a href="/recipe/123/pizza">Link</a>'
+
+
+def test_attr_interpolation_arithmetic(zt):
+    """Test arithmetic expression in interpolated attribute"""
+    result = zt.run(
+        'pub templ run(x: i32) { <div data-value="result: {x + 1}"></div> }',
+        args='.{41}',
+    )
+    assert result == '<div data-value="result: 42"></div>'
+
+
+def test_attr_interpolation_if(zt):
+    """Test if expression in interpolated attribute"""
+    result = zt.run(
+        'pub templ run(active: bool) { <div class="btn {if (active) "active" else "inactive"}"></div> }',
+        args='.{true}',
+    )
+    assert result == '<div class="btn active"></div>'
+
+
+def test_attr_interpolation_switch(zt):
+    """Test switch expression in interpolated attribute"""
+    result = zt.run('''
+const Status = enum { ok, err };
+
+pub templ run(s: Status) {
+    <div class="status-{switch (s) { .ok => "success", .err => "error" }}"></div>
+}
+''', args='.{.ok}')
+    assert result == '<div class="status-success"></div>'

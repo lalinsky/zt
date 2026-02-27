@@ -289,7 +289,7 @@ pub const Generator = struct {
         // Check if we have any dynamic attributes
         var has_dynamic = false;
         for (elem.attributes) |attr| {
-            if (attr.value == .dynamic) {
+            if (attr.value == .dynamic or attr.value == .interpolated) {
                 has_dynamic = true;
                 break;
             }
@@ -315,7 +315,7 @@ pub const Generator = struct {
                         try self.output.writeAll(" ");
                         try self.output.writeAll(attr.name);
                     },
-                    .dynamic => {},
+                    .dynamic, .interpolated => {},
                 }
             }
 
@@ -356,6 +356,30 @@ pub const Generator = struct {
                         try self.output.writeAll("\", ");
                         try self.output.writeAll(expr);
                         try self.output.writeAll(");\n");
+                    },
+                    .interpolated => |parts| {
+                        try self.writeIndent();
+                        try self.output.writeAll("try writer.writeAll(\" ");
+                        try self.output.writeAll(attr.name);
+                        try self.output.writeAll("=\\\"\");\n");
+                        for (parts) |part| {
+                            switch (part) {
+                                .static => |val| {
+                                    try self.writeIndent();
+                                    try self.output.writeAll("try writer.writeAll(\"");
+                                    try self.writeEscapedForZig(val);
+                                    try self.output.writeAll("\");\n");
+                                },
+                                .dynamic => |expr| {
+                                    try self.writeIndent();
+                                    try self.output.writeAll("try zt.writeEscaped(writer, ");
+                                    try self.output.writeAll(expr);
+                                    try self.output.writeAll(");\n");
+                                },
+                            }
+                        }
+                        try self.writeIndent();
+                        try self.output.writeAll("try writer.writeAll(\"\\\"\");\n");
                     },
                 }
             }
