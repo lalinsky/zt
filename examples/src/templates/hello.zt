@@ -1,63 +1,58 @@
+const Post = @import("../models.zig").Post;
 const User = @import("../models.zig").User;
 
-pub templ hello(name: []const u8) {
-    <div class="greeting">
-        <h1>Hello, {name}!</h1>
-    </div>
+fn formatDate(ts: i64) []const u8 {
+    _ = ts;
+    return "2024-01-15";
 }
 
-pub templ list(items: []const []const u8) {
-    <ul>
-        for (items) |item| {
-            <li>{item}</li>
-        }
-    </ul>
-}
-
-pub templ userCard(user: User) {
-    <div class="user-card">
-        <h2>{user.name}</h2>
-        <p>{user.email}</p>
-        {if (user.is_admin) <span class="badge">Admin</span>}
-    </div>
-}
-
-pub templ userList(users: []const User) {
-    <div class="user-list">
-        for (users) |user| {
-            @userCard(user)
-        }
-    </div>
-}
-
-pub templ layout(title: []const u8) {
+pub templ Layout(title: []const u8) {
+    <!DOCTYPE html>
     <html>
-        <head><title>{title}</title></head>
-        <body>@children</body>
+        <head>
+            <title>{title}</title>
+            <link rel="stylesheet" href="/style.css" />
+        </head>
+        <body>
+            @Nav()
+            <main>
+                @children
+            </main>
+        </body>
     </html>
 }
 
-pub templ section(title: []const u8) {
-    <section>
-        <h2>{title}</h2>
-        @children
-    </section>
+pub templ Nav() {
+    <nav>
+        <a href="/">Home</a>
+        <a href="/about">About</a>
+    </nav>
 }
 
-pub templ page(title: []const u8, user: User) {
-    @layout(title) {
-        @section("Profile") {
-            <p>{user.name}</p>
+pub templ PostCard(post: Post) {
+    <article class="card">
+        <h2><a href="/posts/{post.id}/{post.slug}">{post.title}</a></h2>
+        <time>{formatDate(post.created_at)}</time>
+        if (post.subtitle) |subtitle| {
+            <p class="subtitle">{subtitle}</p>
         }
-        @section("Contact") {
-            <p>{user.email}</p>
+        <div class="tags">
+            {for (post.tags) |tag| <span class="tag">{tag}</span>}
+        </div>
+    </article>
+}
+
+pub templ HomePage(user: ?User, posts: []const Post) {
+    @Layout("Home") {
+        if (user) |u| {
+            <p>Welcome back, {u.name}!</p>
+        } else {
+            <p>Welcome, guest! <a href="/login">Log in</a></p>
         }
+        <section class="posts">
+            for (posts) |post| {
+                @PostCard(post)
+            }
+        </section>
     }
-}
-
-pub templ sidebar(title: []const u8, content: zt.Component) {
-    <aside>
-        <h3>{title}</h3>
-        @content
-    </aside>
 }
