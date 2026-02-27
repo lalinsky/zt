@@ -1,12 +1,17 @@
 import os
 import subprocess
 import re
+import shutil
 from pathlib import Path
 import pytest
 
 
 def setup_workdir(project_root: Path, workdir: Path):
     """Initialize zig project and build files (called once per session)."""
+    zig_cache = project_root / ".zig-cache"
+    if zig_cache.exists():
+        shutil.rmtree(zig_cache)
+
     subprocess.run(["zig", "init"], cwd=workdir, check=True, capture_output=True)
 
     # Rewrite build.zig
