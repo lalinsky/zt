@@ -304,26 +304,11 @@ pub const Parser = struct {
 
     fn parseNodes(self: *Parser, block_level: bool) Error![]const ast.Node {
         var nodes: std.ArrayList(ast.Node) = .empty;
-        var in_block_context = block_level;
 
         while (true) {
-            const c = self.peek() orelse break;
-            if (c == '}' or self.check("</")) break;
+            if (self.peek() == null or self.peek() == '}' or self.check("</")) break;
 
-            // In block context, skip whitespace (indentation)
-            // In inline context, check if we hit a newline -> switch to block context
-            if (in_block_context) {
-                self.skipWhitespace();
-                if (self.peek() == null or self.peek() == '}' or self.check("</")) break;
-            } else if (c == '\n' or c == '\r') {
-                // Newline switches us to block context
-                self.skipWhitespace();
-                in_block_context = true;
-                if (self.peek() == null or self.peek() == '}' or self.check("</")) break;
-            }
-            // Otherwise inline: don't skip whitespace, it's content
-
-            if (try self.parseNode(in_block_context)) |node| {
+            if (try self.parseNode(block_level)) |node| {
                 try nodes.append(self.allocator, node);
             } else {
                 break;
@@ -333,14 +318,25 @@ pub const Parser = struct {
         return nodes.items;
     }
 
-    fn parseNode(self: *Parser, allow_block_constructs: bool) Error!?ast.Node {
+    fn parseNode(self: *Parser, at_block_start: bool) Error!?ast.Node {
+        // Save position before skipping whitespace
+        const saved_pos = self.pos;
+        const saved_line = self.line;
+        const saved_col = self.col;
+
+        self.skipWhitespace();
+
+        // Block constructs allowed at block start OR if we crossed a newline
+        const allow_block_constructs = at_block_start or (self.line > saved_line);
+
         const c = self.peek() orelse return null;
+        if (c == '}') return null;
 
         if (c == '<') {
             if (self.check("</")) return null;
             if (self.check("<!--")) {
                 try self.skipComment();
-                return self.parseNode(allow_block_constructs);
+                return self.parseNode(at_block_start);
             }
             if (self.checkDoctypeInsensitive()) {
                 return .{ .doctype = try self.parseDoctype() };
@@ -356,6 +352,11 @@ pub const Parser = struct {
             if (self.check("if ")) return .{ .if_stmt = try self.parseIfStatement() };
             if (self.check("switch ")) return .{ .switch_stmt = try self.parseSwitchStatement() };
         }
+
+        // Fallback to text - restore position to include whitespace
+        self.pos = saved_pos;
+        self.line = saved_line;
+        self.col = saved_col;
 
         return .{ .text = try self.parseText() };
     }
@@ -387,7 +388,7 @@ pub const Parser = struct {
         // Opening tag: <tag>
         if (!self.match(">")) return self.fail("expected '>' to close opening tag", .{});
 
-        // Parse children (not at block start, but newlines still enable constructs)
+        // Parse children (not at block start, but newlines enable block constructs)
         const children = try self.parseNodes(false);
 
         // Closing tag: </tag>

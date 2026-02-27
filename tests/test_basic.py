@@ -335,7 +335,7 @@ def test_literal_text_content(zt):
       hello world
     </foo>
 }''')
-    assert result == '<foo>hello world\n    </foo>'
+    assert result == '<foo>\n      hello world\n    </foo>'
 
 
 def test_attr_string_interpolation(zt):
@@ -378,3 +378,32 @@ pub templ run(s: Status) {
 }
 ''', args='.{.ok}')
     assert result == '<div class="status-success"></div>'
+
+
+def test_issue4_case1(zt):
+    """Test from issue #4 comment - inline"""
+    result = zt.run('''
+const Recipe = struct { title: []const u8 };
+
+pub templ run(recipe: Recipe) {
+    <header>
+        {recipe.title} | test
+    </header>
+}
+''', args='.{.{ .title = "Ramen" }}')
+    assert result == '<header>Ramen | test\n    </header>'
+
+
+def test_issue4_case2(zt):
+    """Test from issue #4 comment - multiline"""
+    result = zt.run('''
+const Recipe = struct { title: []const u8 };
+
+pub templ run(recipe: Recipe) {
+    <header>
+        {recipe.title}
+        | test
+    </header>
+}
+''', args='.{.{ .title = "Ramen" }}')
+    assert result == '<header>Ramen\n        | test\n    </header>'
