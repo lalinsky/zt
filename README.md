@@ -16,10 +16,6 @@ overhead at runtime. Output is directly written to a `std.Io.Writer`, so there i
 [Zeix]: https://ziex.dev/
 [Templ]: https://templ.guide/
 
-## Requirements
-
-- Zig 0.15.2 or later
-
 ## Installation
 
 ```bash
