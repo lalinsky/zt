@@ -106,6 +106,9 @@ pub fn writeEscaped(writer: *std.Io.Writer, value: anytype) std.Io.Writer.Error!
         .bool => {
             try writer.writeAll(if (value) "true" else "false");
         },
+        .void => {
+            // Do nothing for void return values
+        },
         else => {
             try writeFormatted(writer, value);
         },
@@ -164,10 +167,13 @@ pub fn writeRaw(writer: *std.Io.Writer, value: anytype) std.Io.Writer.Error!void
                 return;
             }
         },
-        else => {},
+        .void => {
+            // Do nothing for void return values
+        },
+        else => {
+            try writer.print("{}", .{value});
+        },
     }
-
-    try writer.print("{}", .{value});
 }
 
 // =========================================================================
