@@ -1,3 +1,6 @@
+import pytest
+
+
 def test_static_text(zt):
     result = zt.run('pub templ run() { <p>Hello</p> }')
     assert result == '<p>Hello</p>'
@@ -436,3 +439,59 @@ pub templ run() {
 }
 ''')
     assert result == '<button type="button" data-action="delete" data-confirm="Are you sure?" class="secondary-button">\n        Delete\n    </button>'
+
+
+# Attribute value escaping
+
+def test_attr_escape_double_quote(zt):
+    """Double quotes in dynamic attribute values must be escaped."""
+    result = zt.run(
+        r'pub templ run(s: []const u8) { <div title={s}></div> }',
+        args=r'.{"say \"hello\""}',
+    )
+    assert result == '<div title="say &quot;hello&quot;"></div>'
+
+
+def test_attr_escape_single_quote(zt):
+    """Single quotes in dynamic attribute values must be escaped."""
+    result = zt.run(
+        'pub templ run(s: []const u8) { <div title={s}></div> }',
+        args=".{\"it's fine\"}",
+    )
+    assert result == '<div title="it&#x27;s fine"></div>'
+
+
+def test_attr_escape_angle_brackets(zt):
+    """Angle brackets in dynamic attribute values must be escaped."""
+    result = zt.run(
+        'pub templ run(s: []const u8) { <div title={s}></div> }',
+        args='.{"<script>"}',
+    )
+    assert result == '<div title="&lt;script&gt;"></div>'
+
+
+def test_attr_escape_ampersand(zt):
+    """Ampersands in dynamic attribute values must be escaped."""
+    result = zt.run(
+        'pub templ run(s: []const u8) { <div title={s}></div> }',
+        args='.{"a&b"}',
+    )
+    assert result == '<div title="a&amp;b"></div>'
+
+
+# Style elements
+
+
+@pytest.mark.xfail(reason="CSS braces interpreted as Zig expressions - needs raw text mode for style/script")
+def test_style_element_static(zt):
+    """Static CSS inside style element should pass through unchanged."""
+    result = zt.run('''
+pub templ run() {
+    <style>
+        .foo { color: red; }
+    </style>
+}
+''')
+    assert '<style>' in result
+    assert '.foo { color: red; }' in result
+    assert '</style>' in result

@@ -16,6 +16,17 @@ def test_component_call_in_loop(zt):
     assert result == '<li>a</li><li>b</li>'
 
 
+def test_inline_for_with_component(zt):
+    """Inline for loop with component call as body."""
+    result = zt.run('''
+        templ Item(x: []const u8) { <li>{x}</li> }
+        pub templ run(items: []const []const u8) {
+            <ul>{for (items) |x| @Item(x)}</ul>
+        }
+    ''', args='.{&[_][]const u8{"a", "b"}}')
+    assert result == '<ul><li>a</li><li>b</li></ul>'
+
+
 def test_component_with_children(zt):
     result = zt.run('''
         templ wrapper() {
