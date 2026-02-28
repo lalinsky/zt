@@ -1,6 +1,13 @@
 const std = @import("std");
 const ast = @import("ast.zig");
 
+/// HTML raw text elements whose content is not parsed for expressions.
+/// https://html.spec.whatwg.org/multipage/syntax.html#raw-text-elements
+const raw_text_elements = std.StaticStringMap(void).initComptime(.{
+    .{ "script", {} },
+    .{ "style", {} },
+});
+
 pub const ParseError = struct {
     line: usize,
     col: usize,
@@ -388,8 +395,12 @@ pub const Parser = struct {
         // Opening tag: <tag>
         if (!self.match(">")) return self.fail("expected '>' to close opening tag", .{});
 
-        // Parse children (not at block start, but newlines enable block constructs)
-        const children = try self.parseNodes(false);
+        // Raw text elements (style, script) - content is not parsed for expressions
+        const children = if (raw_text_elements.has(tag))
+            try self.parseRawTextContent(tag)
+        else
+            // Parse children (not at block start, but newlines enable block constructs)
+            try self.parseNodes(false);
 
         // Closing tag: </tag>
         self.skipWhitespace();
@@ -408,6 +419,59 @@ pub const Parser = struct {
             .loc = loc,
             .end_loc = end_loc,
         };
+    }
+
+    /// Parse raw text content until the closing tag (for style, script elements).
+    /// Returns content as a single Text node, or empty if content is whitespace-only.
+    fn parseRawTextContent(self: *Parser, tag: []const u8) Error![]const ast.Node {
+        const start = self.pos;
+
+        // Find the closing tag
+        while (self.pos < self.source.len) {
+            if (self.check("</")) {
+                // Check if this is actually our closing tag
+                const saved_pos = self.pos;
+                const saved_line = self.line;
+                const saved_col = self.col;
+
+                _ = self.match("</");
+                const closing_start = self.pos;
+                while (self.peek()) |c| {
+                    if (std.ascii.isAlphanumeric(c) or c == '-' or c == '_' or c == ':') {
+                        _ = self.advance();
+                    } else break;
+                }
+                const closing_tag = self.source[closing_start..self.pos];
+
+                if (std.ascii.eqlIgnoreCase(closing_tag, tag)) {
+                    // Found the closing tag - restore position to before </
+                    self.pos = saved_pos;
+                    self.line = saved_line;
+                    self.col = saved_col;
+                    break;
+                }
+
+                // Not our closing tag, restore and continue
+                self.pos = saved_pos;
+                self.line = saved_line;
+                self.col = saved_col;
+            }
+            _ = self.advance();
+        }
+
+        const content = self.source[start..self.pos];
+
+        // Return empty children if content is empty/whitespace-only
+        if (std.mem.trim(u8, content, " \t\n\r").len == 0) {
+            return &[_]ast.Node{};
+        }
+
+        // Return single text node with raw content
+        const text_node = try self.allocator.create(ast.Node);
+        text_node.* = .{ .text = .{ .content = content } };
+        const nodes = try self.allocator.alloc(ast.Node, 1);
+        nodes[0] = text_node.*;
+        return nodes;
     }
 
     fn parseTagName(self: *Parser) Error![]const u8 {

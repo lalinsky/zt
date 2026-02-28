@@ -1,6 +1,3 @@
-import pytest
-
-
 def test_static_text(zt):
     result = zt.run('pub templ run() { <p>Hello</p> }')
     assert result == '<p>Hello</p>'
@@ -482,7 +479,6 @@ def test_attr_escape_ampersand(zt):
 # Style elements
 
 
-@pytest.mark.xfail(reason="CSS braces interpreted as Zig expressions - needs raw text mode for style/script")
 def test_style_element_static(zt):
     """Static CSS inside style element should pass through unchanged."""
     result = zt.run('''
@@ -495,3 +491,17 @@ pub templ run() {
     assert '<style>' in result
     assert '.foo { color: red; }' in result
     assert '</style>' in result
+
+
+def test_script_element_static(zt):
+    """Static JS inside script element should pass through unchanged."""
+    result = zt.run('''
+pub templ run() {
+    <script>
+        if (x) { console.log("hello"); }
+    </script>
+}
+''')
+    assert '<script>' in result
+    assert 'if (x) { console.log("hello"); }' in result
+    assert '</script>' in result
