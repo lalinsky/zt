@@ -72,6 +72,9 @@ if [ "$VERBOSE" = true ]; then
 fi
 eval zig build $BUILD_ARGS --summary all
 
+echo "=== Building examples ==="
+(cd examples && eval zig build run > /dev/null)
+
 if [ "$FULL_MODE" = true ]; then
     echo "=== Running integration tests ==="
     python -m pytest tests/ -v
