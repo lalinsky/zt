@@ -407,3 +407,17 @@ pub templ run(recipe: Recipe) {
 }
 ''', args='.{.{ .title = "Ramen" }}')
     assert result == '<header>Ramen\n        | test\n    </header>'
+
+
+def test_void_function_no_output(zt):
+    """Test that void-returning functions don't print 'void' - issue #11"""
+    result = zt.run('''
+fn writeDate(writer: *@import("std").Io.Writer) void {
+    writer.writeAll("2022-05-06") catch return;
+}
+
+pub templ run() {
+    <p>Created {!writeDate(writer)}</p>
+}
+''')
+    assert result == '<p>Created 2022-05-06</p>'
