@@ -1,18 +1,16 @@
 import os
 import subprocess
 import re
-import shutil
 from pathlib import Path
 import pytest
 
 
 def setup_workdir(project_root: Path, workdir: Path):
     """Initialize zig project and build files (called once per session)."""
-    zig_cache = workdir / ".zig-cache"
-    if zig_cache.exists():
-        shutil.rmtree(zig_cache)
+    env = os.environ.copy()
+    env["ZIG_LOCAL_CACHE_DIR"] = str(workdir / ".zig-cache")
 
-    subprocess.run(["zig", "init"], cwd=workdir, check=True, capture_output=True)
+    subprocess.run(["zig", "init"], cwd=workdir, check=True, capture_output=True, env=env)
 
     # Rewrite build.zig
     build_zig = workdir / "build.zig"
@@ -96,11 +94,14 @@ pub fn main() !void {{
 ''')
 
         # Build and run
+        env = os.environ.copy()
+        env["ZIG_LOCAL_CACHE_DIR"] = str(self.workdir / ".zig-cache")
         result = subprocess.run(
             ["zig", "build", "run"],
             capture_output=True,
             text=True,
             cwd=self.workdir,
+            env=env,
         )
         if result.returncode != 0:
             raise RuntimeError(f"zig build run failed:\n{result.stderr}")
