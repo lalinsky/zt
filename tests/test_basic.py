@@ -421,3 +421,18 @@ pub templ run() {
 }
 ''')
     assert result == '<p>Created 2022-05-06</p>'
+
+
+def test_multiline_html_attributes(zt):
+    """Test that HTML tags with attributes on multiple lines compile - issue #14"""
+    result = zt.run('''
+pub templ run() {
+    <button type="button"
+            data-action="delete"
+            data-confirm="Are you sure?"
+            class="secondary-button">
+        Delete
+    </button>
+}
+''')
+    assert result == '<button type="button" data-action="delete" data-confirm="Are you sure?" class="secondary-button">\n        Delete\n    </button>'

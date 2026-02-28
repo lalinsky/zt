@@ -427,7 +427,7 @@ pub const Parser = struct {
         var attrs: std.ArrayList(ast.Attribute) = .empty;
 
         while (true) {
-            self.skipSpaces();
+            self.skipWhitespace();
             const c = self.peek() orelse break;
             if (c == '>' or c == '/') break;
 
@@ -1866,4 +1866,30 @@ test "parse doctype case insensitive" {
     try std.testing.expectEqual(@as(usize, 2), template.body.len);
     try std.testing.expect(template.body[0] == .doctype);
     try std.testing.expectEqualStrings("html", template.body[0].doctype.value);
+}
+
+test "parse multiline html attributes - issue #14" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test() {
+        \\    <button type="button"
+        \\            data-action="delete"
+        \\            class="btn">
+        \\        Delete
+        \\    </button>
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    try std.testing.expectEqual(@as(usize, 1), template.body.len);
+    const element = template.body[0].element;
+    try std.testing.expectEqualStrings("button", element.tag);
+    try std.testing.expectEqual(@as(usize, 3), element.attributes.len);
+    try std.testing.expectEqualStrings("type", element.attributes[0].name);
+    try std.testing.expectEqualStrings("data-action", element.attributes[1].name);
+    try std.testing.expectEqualStrings("class", element.attributes[2].name);
 }
