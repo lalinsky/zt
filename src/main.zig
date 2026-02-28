@@ -64,5 +64,4 @@ fn compileTemplate(allocator: std.mem.Allocator, input_path: []const u8, output_
         std.debug.print("Error writing '{s}': {}\n", .{ output_path, err });
         return error.WriteFailed;
     };
-    std.debug.print("Wrote {s}\n", .{output_path});
 }
