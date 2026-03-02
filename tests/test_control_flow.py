@@ -557,3 +557,112 @@ def test_inline_switch_func_call(zt):
         args='.{.active}',
     )
     assert result == '42'
+
+
+def test_text_then_switch_then_text(zt):
+    """Regression test for https://github.com/lalinsky/zt/issues/17
+
+    Text followed by switch statement should not consume the switch keyword as text.
+    """
+    result = zt.run(
+        '''const Visibility = enum { private, public };
+
+        pub templ run(v: Visibility) {
+            <h1>
+                test text
+                {
+                    switch (v) {
+                        .private => {
+                            <img src="/static/img/lock.svg" />
+                        },
+                        .public => {
+                            <img src="/static/img/public.svg" />
+                        },
+                    }
+                }
+                more text
+            </h1>
+        }''',
+        args='.{.private}',
+    )
+    assert '<h1>' in result
+    assert 'test text' in result
+    assert '<img src="/static/img/lock.svg">' in result
+    assert 'more text' in result
+    assert '</h1>' in result
+    # Make sure switch is NOT treated as text
+    assert 'switch' not in result
+
+
+def test_inline_switch_with_block_branches(zt):
+    """Inline switch with { } blocks containing HTML in branches, sandwiched by text on separate lines."""
+    result = zt.run(
+        '''const Visibility = enum { private, public };
+
+        pub templ run(v: Visibility) {
+            <h1>
+                before
+                {switch (v) { .private => { <img src="/lock.svg" /> }, .public => { <img src="/public.svg" /> } }}
+                after
+            </h1>
+        }''',
+        args='.{.public}',
+    )
+    assert 'before' in result
+    assert '<img src="/public.svg">' in result
+    assert 'after' in result
+    assert 'switch' not in result
+
+
+def test_issue17_comment_case1(zt):
+    """Test case from issue #17 comment - multiline with newline after {"""
+    result = zt.run(
+        '''const Visibility = enum { private, public };
+
+        pub templ run(v: Visibility) {
+            <h1>
+                test text
+
+                {
+                    switch (v) {
+                        .private => {
+                            <img src="/static/img/lock.svg" />
+                        },
+                        .public => {
+                            <img src="/static/img/public.svg" />
+                        },
+                    }
+                }
+            </h1>
+        }''',
+        args='.{.private}',
+    )
+    assert 'test text' in result
+    assert '<img src="/static/img/lock.svg">' in result
+    assert 'switch' not in result
+
+
+def test_issue17_comment_case2(zt):
+    """Test case from issue #17 comment - space after { with multiline switch"""
+    result = zt.run(
+        '''const Visibility = enum { private, public };
+
+        pub templ run(v: Visibility) {
+            <h1>
+                test text
+
+                { switch (v) {
+                    .private => {
+                        <img src="/static/img/lock.svg" />
+                    },
+                    .public => {
+                        <img src="/static/img/public.svg" />
+                    },
+                } }
+            </h1>
+        }''',
+        args='.{.public}',
+    )
+    assert 'test text' in result
+    assert '<img src="/static/img/public.svg">' in result
+    assert 'switch' not in result

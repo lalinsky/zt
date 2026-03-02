@@ -619,11 +619,11 @@ pub const Parser = struct {
         // Check for raw output: {!expr}
         const is_raw = self.match("!");
 
-        self.skipSpaces();
+        self.skipWhitespace();
 
         const content = try self.parseExprContent();
 
-        self.skipSpaces();
+        self.skipWhitespace();
         if (!self.match("}")) return self.fail("expected '}}' to close expression", .{});
 
         return .{ .content = content, .raw = is_raw, .loc = loc };
@@ -718,6 +718,11 @@ pub const Parser = struct {
 
     fn parseSwitchBranchBody(self: *Parser) Error!ast.Branch {
         const c = self.peek() orelse return self.fail("unexpected end of file in branch", .{});
+
+        // Block with template nodes: { ... }
+        if (c == '{') {
+            return .{ .nodes = try self.parseBracedNodes() };
+        }
 
         // Element branch: <tag>...</tag>
         if (c == '<' and !self.check("</")) {
@@ -933,22 +938,22 @@ pub const Parser = struct {
 
     fn parseSwitchExpr(self: *Parser) Error!ast.SwitchExpr {
         _ = self.match("switch");
-        self.skipSpaces();
+        self.skipWhitespace();
         const value = try self.parseParenExpr();
-        self.skipSpaces();
+        self.skipWhitespace();
 
         if (!self.match("{")) return self.fail("expected '{{' after switch expression", .{});
 
         var cases: std.ArrayList(ast.SwitchBranch) = .empty;
         while (true) {
-            self.skipSpaces();
+            self.skipWhitespace();
             if (self.peek() == @as(u8, '}')) break;
             try cases.append(self.allocator, try self.parseSwitchBranch());
-            self.skipSpaces();
+            self.skipWhitespace();
             if (!self.match(",")) break;
         }
 
-        self.skipSpaces();
+        self.skipWhitespace();
         if (!self.match("}")) return self.fail("expected '}}' to close switch", .{});
 
         return .{ .value = value, .cases = cases.items };
@@ -956,16 +961,16 @@ pub const Parser = struct {
 
     fn parseSwitchBranch(self: *Parser) Error!ast.SwitchBranch {
         const pattern = try self.parseSwitchPattern();
-        self.skipSpaces();
+        self.skipWhitespace();
         if (!self.match("=>")) return self.fail("expected '=>' after switch pattern", .{});
-        self.skipSpaces();
+        self.skipWhitespace();
 
         const capture: ?[]const u8 = if (self.peek() == @as(u8, '|'))
             try self.parseCaptures()
         else
             null;
 
-        self.skipSpaces();
+        self.skipWhitespace();
         return .{ .pattern = pattern, .capture = capture, .body = try self.parseSwitchBranchBody() };
     }
 

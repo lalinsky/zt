@@ -97,11 +97,12 @@ pub const ForExpr = struct {
     body: Branch,
 };
 
-/// Branch in inline if/for - element, component call, nested if, or zig code
+/// Branch in inline if/for - element, component call, nested if, nodes block, or zig code
 pub const Branch = union(enum) {
     element: *Element,
     component_call: ComponentCall,
     if_expr: *IfExpr,
+    nodes: []const Node,
     zig_code: []const u8,
 };
 
