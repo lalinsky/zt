@@ -104,7 +104,10 @@ pub fn main() !void {{
             env=env,
         )
         if result.returncode != 0:
-            raise RuntimeError(f"zig build run failed:\n{result.stderr}")
+            generated = ""
+            if zig_file.exists():
+                generated = f"\n\nGenerated code:\n{zig_file.read_text()}"
+            raise RuntimeError(f"zig build run failed:\n{result.stderr}{generated}")
 
         return result.stdout
 
