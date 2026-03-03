@@ -666,3 +666,46 @@ def test_issue17_comment_case2(zt):
     assert 'test text' in result
     assert '<img src="/static/img/public.svg">' in result
     assert 'switch' not in result
+
+
+def test_issue17_comment_if_block(zt):
+    """Test case from issue #17 comment - if with block containing HTML after text"""
+    result = zt.run(
+        '''pub templ run(number_of_portions: ?u32) {
+            <h2>
+                test text
+
+                {
+                    if (number_of_portions) |n| {
+                        <p>Portions: {n}</p>
+                    }
+                }
+            </h2>
+        }''',
+        args='.{4}',
+    )
+    assert 'test text' in result
+    assert '<p>Portions: 4</p>' in result
+    assert 'if' not in result
+
+
+def test_issue17_comment_for_block(zt):
+    """Test for loop with block containing HTML after text"""
+    result = zt.run(
+        '''pub templ run(items: []const []const u8) {
+            <ul>
+                header text
+
+                {
+                    for (items) |item| {
+                        <li>{item}</li>
+                    }
+                }
+            </ul>
+        }''',
+        args='.{&.{"apple", "banana"}}',
+    )
+    assert 'header text' in result
+    assert '<li>apple</li>' in result
+    assert '<li>banana</li>' in result
+    assert 'for' not in result
