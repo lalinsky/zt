@@ -662,9 +662,9 @@ pub const Parser = struct {
 
     fn parseIfExpr(self: *Parser) Error!ast.IfExpr {
         _ = self.match("if");
-        self.skipSpaces();
+        self.skipWhitespace();
         const condition = try self.parseParenExpr();
-        self.skipSpaces();
+        self.skipWhitespace();
 
         // Optional capture: |val|
         const capture: ?[]const u8 = if (self.peek() == @as(u8, '|'))
@@ -672,17 +672,17 @@ pub const Parser = struct {
         else
             null;
 
-        self.skipSpaces();
+        self.skipWhitespace();
         const then_branch = try self.parseBranch();
-        self.skipSpaces();
+        self.skipWhitespace();
 
         var else_capture: ?[]const u8 = null;
         const else_branch: ?ast.Branch = if (self.match("else")) blk: {
-            self.skipSpaces();
+            self.skipWhitespace();
             // Optional else capture: else |err|
             if (self.peek() == @as(u8, '|')) {
                 else_capture = try self.parseCaptures();
-                self.skipSpaces();
+                self.skipWhitespace();
             }
             break :blk try self.parseBranch();
         } else null;
@@ -692,6 +692,11 @@ pub const Parser = struct {
 
     fn parseBranch(self: *Parser) Error!ast.Branch {
         const c = self.peek() orelse return self.fail("unexpected end of file in branch", .{});
+
+        // Block with template nodes: { ... }
+        if (c == '{') {
+            return .{ .nodes = try self.parseBracedNodes() };
+        }
 
         // Element branch: <tag>...</tag>
         if (c == '<' and !self.check("</")) {
@@ -796,11 +801,11 @@ pub const Parser = struct {
 
     fn parseForExpr(self: *Parser) Error!ast.ForExpr {
         _ = self.match("for");
-        self.skipSpaces();
+        self.skipWhitespace();
         const iterable = try self.parseParenExpr();
-        self.skipSpaces();
+        self.skipWhitespace();
         const captures = try self.parseCaptures();
-        self.skipSpaces();
+        self.skipWhitespace();
         const body = try self.parseBranch();
 
         return .{ .iterable = iterable, .captures = captures, .body = body };
