@@ -16,7 +16,7 @@ indent = { tab-width = 4, unit = "    " }
 
 [[grammar]]
 name = "zt"
-source = { path = "/home/lukas/projects/zt/editor/tree-sitter-zt" }
+source = { git = "https://github.com/lalinsky/zt", rev = "main", subpath = "editor/tree-sitter-zt" }
 ```
 
 ## 2. Build Grammar
@@ -26,9 +26,10 @@ hx --grammar fetch
 hx --grammar build
 ```
 
-## 3. Link Queries
+## 3. Copy Queries
+
+From the root of this repository:
 
 ```sh
-mkdir -p ~/.config/helix/runtime/queries
-ln -s /home/lukas/projects/zt/editor/tree-sitter-zt/queries ~/.config/helix/runtime/queries/zt
+cp -r editor/helix/queries/zt ~/.config/helix/runtime/queries/zt
 ```
