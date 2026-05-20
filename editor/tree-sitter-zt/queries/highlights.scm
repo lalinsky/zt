@@ -12,7 +12,7 @@
 (parameter type: (type_expr) @type)
 
 ; Captures (loop/optional variables)
-(capture (capture_content) @variable)
+(capture (capture_content) @variable.parameter)
 
 ; HTML structure
 (open_tag (tag_name) @tag)
@@ -50,8 +50,16 @@
 "," @punctuation.delimiter
 ":" @punctuation.delimiter
 
-; Text content between tags
-(text) @string.special
+; Text content between tags — semantic highlights for common elements, default
+; foreground for everything else (matching html grammar conventions)
+((element (open_tag (tag_name) @tag) (text) @markup.bold)
+  (#any-of? @tag "strong" "b"))
+((element (open_tag (tag_name) @tag) (text) @markup.italic)
+  (#any-of? @tag "em" "i"))
+((element (open_tag (tag_name) @tag) (text) @markup.strikethrough)
+  (#any-of? @tag "s" "del"))
+((element (open_tag (tag_name) @tag) (text) @markup.link.label)
+  (#eq? @tag "a"))
 
 ; Zig embedded content — highlighted via injection where possible,
 ; @embedded gives a baseline style for the rest
