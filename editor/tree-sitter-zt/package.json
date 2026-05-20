@@ -1,0 +1,25 @@
+{
+  "name": "tree-sitter-zt",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for the zt HTML templating language",
+  "main": "bindings/node",
+  "keywords": ["tree-sitter", "zig", "template", "zt"],
+  "dependencies": {
+    "nan": "^2.18.0"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.25.0"
+  },
+  "scripts": {
+    "generate": "tree-sitter generate",
+    "test": "tree-sitter test",
+    "build": "tree-sitter build"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.zt",
+      "file-types": ["zt"],
+      "injection-regex": "zt"
+    }
+  ]
+}
