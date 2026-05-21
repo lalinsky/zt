@@ -76,8 +76,14 @@ echo "=== Building examples ==="
 (cd examples && eval zig build run > /dev/null)
 
 if [ "$FULL_MODE" = true ]; then
+    echo "=== Rebuilding tree-sitter grammar ==="
+    (cd editor/tree-sitter-zt && npx --no tree-sitter generate && npx --no tree-sitter build)
+
     echo "=== Running integration tests ==="
     python -m pytest tests/ -v
+
+    echo "=== Running tree-sitter tests ==="
+    (cd editor/tree-sitter-zt && npx --no tree-sitter test)
 fi
 
 echo "=== All checks passed! ==="

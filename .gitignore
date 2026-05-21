@@ -9,3 +9,4 @@ examples/src/templates/*.zig
 examples/output.actual.txt
 __pycache__/
 .pytest_cache/
+editor/tree-sitter-zt/test/corpus/generated.txt

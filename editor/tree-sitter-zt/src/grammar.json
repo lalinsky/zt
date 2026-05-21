@@ -165,6 +165,14 @@
       "members": [
         {
           "type": "SYMBOL",
+          "name": "style_element"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "script_element"
+        },
+        {
+          "type": "SYMBOL",
           "name": "element"
         },
         {
@@ -198,6 +206,102 @@
         {
           "type": "SYMBOL",
           "name": "text"
+        }
+      ]
+    },
+    "style_element": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "<"
+        },
+        {
+          "type": "STRING",
+          "value": "style"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "attribute"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ">"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "raw_text"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": "</"
+        },
+        {
+          "type": "STRING",
+          "value": "style"
+        },
+        {
+          "type": "STRING",
+          "value": ">"
+        }
+      ]
+    },
+    "script_element": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "<"
+        },
+        {
+          "type": "STRING",
+          "value": "script"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "attribute"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ">"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "raw_text"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": "</"
+        },
+        {
+          "type": "STRING",
+          "value": "script"
+        },
+        {
+          "type": "STRING",
+          "value": ">"
         }
       ]
     },
@@ -1207,6 +1311,10 @@
     {
       "type": "SYMBOL",
       "name": "zig_branch_expr"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "raw_text"
     }
   ],
   "inline": [],

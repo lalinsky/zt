@@ -9,6 +9,7 @@ module.exports = grammar({
     $.zig_expr,         // balanced expression; blocks if/for/switch (for _expr_content)
     $.zig_expr_free,    // balanced expression; unconstrained (attributes, conditions)
     $.zig_branch_expr,  // balanced expression; blocks keywords AND <, @, { (for _branch)
+    $.raw_text,         // raw content of <style> and <script> elements
   ],
 
   extras: ($) => [/[ \t\r\n]/],
@@ -63,6 +64,8 @@ module.exports = grammar({
 
     _node: ($) =>
       choice(
+        $.style_element,
+        $.script_element,
         $.element,
         $.doctype,
         $.html_comment,
@@ -77,6 +80,12 @@ module.exports = grammar({
     // -------------------------------------------------------------------------
     // HTML elements
     // -------------------------------------------------------------------------
+
+    style_element: ($) =>
+      seq("<", "style", repeat($.attribute), ">", optional($.raw_text), "</", "style", ">"),
+
+    script_element: ($) =>
+      seq("<", "script", repeat($.attribute), ">", optional($.raw_text), "</", "script", ">"),
 
     element: ($) =>
       choice(
