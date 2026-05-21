@@ -1,3 +1,4 @@
+import inspect
 import os
 import subprocess
 import re
@@ -64,11 +65,62 @@ pub fn build(b: *std.Build) void {
 ''')
 
 
+GRAMMAR_DIR = Path(__file__).parent.parent / "editor" / "tree-sitter-zt"
+CORPUS_FILE = GRAMMAR_DIR / "test" / "corpus" / "generated.txt"
+
+_POS_RE = re.compile(r' \[\d+, \d+\] - \[\d+, \d+\]')
+
+
+def _current_test_name() -> str:
+    for frame_info in inspect.stack():
+        if frame_info.function.startswith("test_"):
+            return frame_info.function
+    return "unknown"
+
+
+def _append_corpus_entry(test_name: str, template: str, tree: str) -> None:
+    CORPUS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with CORPUS_FILE.open("a") as f:
+        f.write(f"{'=' * 60}\n{test_name}\n{'=' * 60}\n{template}\n---\n{tree.strip()}\n\n")
+
+
+def _parse_zt(path: Path) -> str:
+    """Run tree-sitter parse and return the sexp with positions stripped."""
+    result = subprocess.run(
+        ["npx", "--no", "tree-sitter", "parse", str(path)],
+        capture_output=True,
+        text=True,
+        cwd=GRAMMAR_DIR,
+    )
+    return _POS_RE.sub("", result.stdout)
+
+
+def _parse_sexp(s: str) -> list:
+    tokens = re.findall(r'[()]|[^\s()]+', s)
+    pos = [0]
+
+    def parse():
+        assert tokens[pos[0]] == '('
+        pos[0] += 1
+        name = tokens[pos[0]]
+        pos[0] += 1
+        result = [name]
+        while tokens[pos[0]] != ')':
+            if tokens[pos[0]].endswith(':'):  # skip field names like name: type:
+                pos[0] += 1
+                continue
+            result.append(parse())
+        pos[0] += 1
+        return result
+
+    return parse()
+
+
 class ZtRunner:
     def __init__(self, workdir: Path):
         self.workdir = workdir
 
-    def run(self, template: str, args: str = ".{}") -> str:
+    def run(self, template: str, args: str = ".{}", expected_ast: str = None) -> str:
         # Delete generated .zig file to force regeneration (avoids timestamp precision issues)
         zig_file = self.workdir / "src/tpl.zig"
         if zig_file.exists():
@@ -77,6 +129,23 @@ class ZtRunner:
         # Write template
         zt_file = self.workdir / "src/tpl.zt"
         zt_file.write_text(template)
+
+        # Validate grammar
+        tree = _parse_zt(zt_file)
+        has_error = any(
+            l.strip().startswith("(ERROR") or "(MISSING" in l
+            for l in tree.splitlines()
+        )
+        if expected_ast is not None:
+            actual = _parse_sexp(tree)
+            expected = _parse_sexp(expected_ast)
+            assert actual == expected, f"AST mismatch for template:\n{template}"
+            _append_corpus_entry(_current_test_name(), template, tree)
+        elif has_error:
+            raise AssertionError(
+                f"Grammar parse error for template:\n{template}\n\n"
+                f"Parse tree:\n{tree}"
+            )
 
         # Write test runner
         runner = self.workdir / "src/root.zig"
@@ -110,6 +179,12 @@ pub fn main() !void {{
             raise RuntimeError(f"zig build run failed:\n{result.stderr}{generated}")
 
         return result.stdout
+
+
+@pytest.fixture(scope="session", autouse=True)
+def clear_corpus():
+    if CORPUS_FILE.exists():
+        CORPUS_FILE.unlink()
 
 
 @pytest.fixture(scope="session")

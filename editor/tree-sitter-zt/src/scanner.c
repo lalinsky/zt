@@ -8,6 +8,7 @@ typedef enum {
     ZIG_EXPR,         // _expr_content: won't consume if/for/switch keywords
     ZIG_EXPR_FREE,    // attributes, conditions: unconstrained
     ZIG_BRANCH_EXPR,  // _branch positions: like ZIG_EXPR + rejects <, @, { as first char
+    RAW_TEXT,         // raw content of <style> and <script> elements
 } TokenType;
 
 void *tree_sitter_zt_external_scanner_create(void) { return NULL; }
@@ -215,6 +216,35 @@ static bool scan_zig_expr(TSLexer *l, bool block_keywords, bool branch_mode, boo
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// RAW_TEXT: consume everything until </ (for style and script elements)
+// ─────────────────────────────────────────────────────────────────────────────
+static bool scan_raw_text(TSLexer *l) {
+    bool has_content = false;
+    for (;;) {
+        if (l->eof(l)) break;
+        if (l->lookahead == '<') {
+            l->mark_end(l); // tentative end before '<'
+            l->advance(l, false);
+            if (l->lookahead == '/') {
+                if (!has_content) return false;
+                l->result_symbol = RAW_TEXT;
+                return true;
+            }
+            // '<' not followed by '/' — include it and continue
+            has_content = true;
+            l->mark_end(l);
+        } else {
+            consume(l);
+            has_content = true;
+        }
+    }
+    if (!has_content) return false;
+    l->mark_end(l);
+    l->result_symbol = RAW_TEXT;
+    return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 bool tree_sitter_zt_external_scanner_scan(
     void *payload,
@@ -222,6 +252,7 @@ bool tree_sitter_zt_external_scanner_scan(
     const bool *valid_symbols
 ) {
     (void)payload;
+    if (valid_symbols[RAW_TEXT])        return scan_raw_text(lexer);
     if (valid_symbols[ZIG_CODE])        return scan_zig_code(lexer);
     if (valid_symbols[ZIG_EXPR])        return scan_zig_expr(lexer, true,  false, true,  ZIG_EXPR);
     if (valid_symbols[ZIG_EXPR_FREE])   return scan_zig_expr(lexer, false, false, false, ZIG_EXPR_FREE);

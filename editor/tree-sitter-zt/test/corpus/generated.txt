@@ -1,0 +1,42 @@
+============================================================
+test_style_element_static
+============================================================
+
+pub templ run() {
+    <style>
+        .foo { color: red; }
+    </style>
+}
+
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (template_body
+      (style_element
+        (raw_text)))))
+
+============================================================
+test_script_element_static
+============================================================
+
+pub templ run() {
+    <script>
+        if (x) { console.log("hello"); }
+    </script>
+}
+
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (template_body
+      (script_element
+        (raw_text)))))
+
