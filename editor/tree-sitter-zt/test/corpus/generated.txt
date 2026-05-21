@@ -1,4 +1,1370 @@
 ============================================================
+test_expression
+============================================================
+pub templ run(name: []const u8) { <p>{name}</p> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expression_escaped
+============================================================
+pub templ run(s: []const u8) { <p>{s}</p> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expression_raw
+============================================================
+pub templ run(s: []const u8) { <p>{!s}</p> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (raw_marker)
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_self_closing
+============================================================
+pub templ run() { <br/><input type="text" /> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (template_body
+      (element
+        (self_closing_tag
+          (tag_name)))
+      (element
+        (self_closing_tag
+          (tag_name)
+          (attribute
+            (quoted_attribute
+              (attribute_name)
+              (attr_static_part))))))))
+
+============================================================
+test_boolean_attr
+============================================================
+pub templ run() { <input disabled checked /> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (template_body
+      (element
+        (self_closing_tag
+          (tag_name)
+          (attribute
+            (boolean_attribute
+              (attribute_name)))
+          (attribute
+            (boolean_attribute
+              (attribute_name))))))))
+
+============================================================
+test_dynamic_attr
+============================================================
+pub templ run(cls: []const u8) { <div class={cls}></div> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name)
+          (attribute
+            (dynamic_attribute
+              (attribute_name)
+              (zig_expr_free))))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_optional_attr_present
+============================================================
+pub templ run(x: ?[]const u8) { <div class={x}></div> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name)
+          (attribute
+            (dynamic_attribute
+              (attribute_name)
+              (zig_expr_free))))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_optional_attr_null
+============================================================
+pub templ run(x: ?[]const u8) { <div class={x}></div> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name)
+          (attribute
+            (dynamic_attribute
+              (attribute_name)
+              (zig_expr_free))))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_zig_function_call
+============================================================
+
+fn double(x: i32) i32 {
+    return x * 2;
+}
+
+pub templ run(x: i32) {
+    <span>{double(x)}</span>
+}
+
+---
+(source_file
+  (zig_code)
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_std_function_call
+============================================================
+
+const std2 = @import("std");
+
+pub templ run(s: []const u8) {
+    <span>{std2.mem.trim(u8, s, " ")}</span>
+}
+
+---
+(source_file
+  (zig_code)
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_attr_if_else
+============================================================
+pub templ run(x: bool) { <div class={if (x) "active" else "inactive"}></div> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name)
+          (attribute
+            (dynamic_attribute
+              (attribute_name)
+              (zig_expr_free))))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_attr_if_else_false
+============================================================
+pub templ run(x: bool) { <div class={if (x) "active" else "inactive"}></div> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name)
+          (attribute
+            (dynamic_attribute
+              (attribute_name)
+              (zig_expr_free))))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_attr_switch
+============================================================
+const Status = enum { active, pending, inactive };
+
+        pub templ run(s: Status) {
+            <div class={switch (s) { .active => "green", .pending => "yellow", else => "gray" }}></div>
+        }
+---
+(source_file
+  (zig_code)
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name)
+          (attribute
+            (dynamic_attribute
+              (attribute_name)
+              (zig_expr_free))))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_array_access
+============================================================
+pub templ run(arr: []const u8) { <span>{arr[0]}</span> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_struct_literal
+============================================================
+
+fn getX(s: struct { x: i32 }) i32 {
+    return s.x;
+}
+
+pub templ run() {
+    <span>{getX(.{ .x = 42 })}</span>
+}
+
+---
+(source_file
+  (zig_code)
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_nested_struct_literal
+============================================================
+
+fn getInnerX(s: struct { inner: struct { x: i32 } }) i32 {
+    return s.inner.x;
+}
+
+pub templ run() {
+    <span>{getInnerX(.{ .inner = .{ .x = 99 } })}</span>
+}
+
+---
+(source_file
+  (zig_code)
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_attr_nested_braces
+============================================================
+
+fn getClass(opts: struct { primary: bool }) []const u8 {
+    return if (opts.primary) "btn-primary" else "btn";
+}
+
+pub templ run() {
+    <div class={getClass(.{ .primary = true })}></div>
+}
+
+---
+(source_file
+  (zig_code)
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (template_body
+      (element
+        (open_tag
+          (tag_name)
+          (attribute
+            (dynamic_attribute
+              (attribute_name)
+              (zig_expr_free))))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_string_with_braces
+============================================================
+pub templ run() { <span>{"{"}</span><span>{"}"}</span> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name)))
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_chained_field_access
+============================================================
+
+const Inner = struct { value: i32 };
+const Outer = struct { inner: Inner };
+
+pub templ run(o: Outer) {
+    <span>{o.inner.value}</span>
+}
+
+---
+(source_file
+  (zig_code)
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_multiple_args
+============================================================
+
+fn add(a: i32, b: i32, c: i32) i32 {
+    return a + b + c;
+}
+
+pub templ run() {
+    <span>{add(1, 2, 3)}</span>
+}
+
+---
+(source_file
+  (zig_code)
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_arithmetic
+============================================================
+pub templ run(x: i32) { <span>{x * 2 + 10}</span> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_comparison
+============================================================
+pub templ run(x: i32) { <span>{x > 10}</span> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_slice
+============================================================
+pub templ run(s: []const u8) { <span>{s[0..5]}</span> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_orelse
+============================================================
+pub templ run(x: ?[]const u8) { <span>{x orelse "default"}</span> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_orelse_present
+============================================================
+pub templ run(x: ?[]const u8) { <span>{x orelse "default"}</span> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_optional_unwrap
+============================================================
+pub templ run(x: ?i32) { <span>{x.?}</span> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_builtin
+============================================================
+pub templ run(x: i32) { <span>{@abs(x)}</span> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_parenthesized
+============================================================
+pub templ run(x: i32) { <span>{(x + 1) * 2}</span> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_number_literal
+============================================================
+pub templ run() { <span>{42}</span> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_string_literal
+============================================================
+pub templ run() { <span>{"hello"}</span> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_bool_literal
+============================================================
+pub templ run() { <span>{true}</span><span>{false}</span> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name)))
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_interspersed_with_text
+============================================================
+pub templ run(a: i32, b: i32) { <span>{a} + {b} = {a + b}</span> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr))
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (text)
+        (expr_block
+          (zig_expr))
+        (text)
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_multiline
+============================================================
+
+pub templ run(x: i32) {
+    <span>{
+        x * 2
+    }</span>
+}
+
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_adjacent
+============================================================
+pub templ run(a: []const u8, b: []const u8) { <span>{a}{b}</span> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr))
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (expr_block
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_expr_with_trailing_text
+============================================================
+pub templ run(title: []const u8) { <header>{title} | test</header> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (text)
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_doctype
+============================================================
+pub templ run() { <!DOCTYPE html><html></html> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (template_body
+      (doctype)
+      (element
+        (open_tag
+          (tag_name))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_doctype_with_whitespace
+============================================================
+pub templ run() {
+    <!DOCTYPE html>
+    <html lang="en"></html>
+}
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (template_body
+      (doctype)
+      (element
+        (open_tag
+          (tag_name)
+          (attribute
+            (quoted_attribute
+              (attribute_name)
+              (attr_static_part))))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_literal_text_content
+============================================================
+pub templ run() {
+    <foo>
+      hello world
+    </foo>
+}
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (text)
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_attr_string_interpolation
+============================================================
+
+const Recipe = struct { id: i32, slug: []const u8 };
+
+pub templ run(recipe: Recipe) {
+    <a href="/recipe/{recipe.id}/{recipe.slug}">Link</a>
+}
+
+---
+(source_file
+  (zig_code)
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name)
+          (attribute
+            (quoted_attribute
+              (attribute_name)
+              (attr_static_part)
+              (attr_interpolation
+                (zig_expr_free))
+              (attr_static_part)
+              (attr_interpolation
+                (zig_expr_free)))))
+        (text)
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_attr_interpolation_arithmetic
+============================================================
+pub templ run(x: i32) { <div data-value="result: {x + 1}"></div> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name)
+          (attribute
+            (quoted_attribute
+              (attribute_name)
+              (attr_static_part)
+              (attr_interpolation
+                (zig_expr_free)))))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_attr_interpolation_if
+============================================================
+pub templ run(active: bool) { <div class="btn {if (active) "active" else "inactive"}"></div> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name)
+          (attribute
+            (quoted_attribute
+              (attribute_name)
+              (attr_static_part)
+              (attr_interpolation
+                (zig_expr_free)))))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_attr_interpolation_switch
+============================================================
+
+const Status = enum { ok, err };
+
+pub templ run(s: Status) {
+    <div class="status-{switch (s) { .ok => "success", .err => "error" }}"></div>
+}
+
+---
+(source_file
+  (zig_code)
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name)
+          (attribute
+            (quoted_attribute
+              (attribute_name)
+              (attr_static_part)
+              (attr_interpolation
+                (zig_expr_free)))))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_issue4_case1
+============================================================
+
+const Recipe = struct { title: []const u8 };
+
+pub templ run(recipe: Recipe) {
+    <header>
+        {recipe.title} | test
+    </header>
+}
+
+---
+(source_file
+  (zig_code)
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (text)
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_issue4_case2
+============================================================
+
+const Recipe = struct { title: []const u8 };
+
+pub templ run(recipe: Recipe) {
+    <header>
+        {recipe.title}
+        | test
+    </header>
+}
+
+---
+(source_file
+  (zig_code)
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (expr_block
+          (zig_expr))
+        (text)
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_void_function_no_output
+============================================================
+
+fn writeDate(writer: *@import("std").Io.Writer) void {
+    writer.writeAll("2022-05-06") catch return;
+}
+
+pub templ run() {
+    <p>Created {!writeDate(writer)}</p>
+}
+
+---
+(source_file
+  (zig_code)
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (template_body
+      (element
+        (open_tag
+          (tag_name))
+        (text)
+        (expr_block
+          (raw_marker)
+          (zig_expr))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_multiline_html_attributes
+============================================================
+
+pub templ run() {
+    <button type="button"
+            data-action="delete"
+            data-confirm="Are you sure?"
+            class="secondary-button">
+        Delete
+    </button>
+}
+
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (template_body
+      (element
+        (open_tag
+          (tag_name)
+          (attribute
+            (quoted_attribute
+              (attribute_name)
+              (attr_static_part)))
+          (attribute
+            (quoted_attribute
+              (attribute_name)
+              (attr_static_part)))
+          (attribute
+            (quoted_attribute
+              (attribute_name)
+              (attr_static_part)))
+          (attribute
+            (quoted_attribute
+              (attribute_name)
+              (attr_static_part))))
+        (text)
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_attr_escape_double_quote
+============================================================
+pub templ run(s: []const u8) { <div title={s}></div> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name)
+          (attribute
+            (dynamic_attribute
+              (attribute_name)
+              (zig_expr_free))))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_attr_escape_single_quote
+============================================================
+pub templ run(s: []const u8) { <div title={s}></div> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name)
+          (attribute
+            (dynamic_attribute
+              (attribute_name)
+              (zig_expr_free))))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_attr_escape_angle_brackets
+============================================================
+pub templ run(s: []const u8) { <div title={s}></div> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name)
+          (attribute
+            (dynamic_attribute
+              (attribute_name)
+              (zig_expr_free))))
+        (close_tag
+          (tag_name))))))
+
+============================================================
+test_attr_escape_ampersand
+============================================================
+pub templ run(s: []const u8) { <div title={s}></div> }
+---
+(source_file
+  (template
+    (pub_keyword)
+    (templ_keyword)
+    (template_name
+      (name))
+    (parameter_list
+      (parameter
+        name: (name)
+        type: (type_expr)))
+    (template_body
+      (element
+        (open_tag
+          (tag_name)
+          (attribute
+            (dynamic_attribute
+              (attribute_name)
+              (zig_expr_free))))
+        (close_tag
+          (tag_name))))))
+
+============================================================
 test_style_element_static
 ============================================================
 
