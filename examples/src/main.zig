@@ -3,9 +3,9 @@ const templates = @import("templates/hello.zig");
 const User = @import("models.zig").User;
 const Post = @import("models.zig").Post;
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var buf: [8192]u8 = undefined;
-    var stdout = std.fs.File.stdout().writer(&buf);
+    var stdout = std.Io.File.stdout().writer(init.io, &buf);
     const w = &stdout.interface;
 
     const user = User{

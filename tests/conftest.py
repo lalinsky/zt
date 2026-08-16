@@ -153,9 +153,9 @@ class ZtRunner:
 const std = @import("std");
 const tpl = @import("tpl.zig");
 
-pub fn main() !void {{
+pub fn main(init: std.process.Init) !void {{
     var buf: [8192]u8 = undefined;
-    var stdout = std.fs.File.stdout().writer(&buf);
+    var stdout = std.Io.File.stdout().writer(init.io, &buf);
     const w = &stdout.interface;
     try tpl.run.render({args}, w);
     try w.flush();
@@ -177,6 +177,21 @@ pub fn main() !void {{
             if zig_file.exists():
                 generated = f"\n\nGenerated code:\n{zig_file.read_text()}"
             raise RuntimeError(f"zig build run failed:\n{result.stderr}{generated}")
+
+        # Generated code must be `zig fmt` clean. A dependent checks its own
+        # tree with `zig fmt --check`, and these files land in it.
+        fmt = subprocess.run(
+            ["zig", "fmt", "--check", str(zig_file)],
+            capture_output=True,
+            text=True,
+            cwd=self.workdir,
+            env=env,
+        )
+        if fmt.returncode != 0:
+            raise AssertionError(
+                f"generated code is not `zig fmt` clean for template:\n{template}\n\n"
+                f"Generated code:\n{zig_file.read_text()}"
+            )
 
         return result.stdout
 
