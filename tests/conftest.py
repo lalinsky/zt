@@ -178,6 +178,21 @@ pub fn main(init: std.process.Init) !void {{
                 generated = f"\n\nGenerated code:\n{zig_file.read_text()}"
             raise RuntimeError(f"zig build run failed:\n{result.stderr}{generated}")
 
+        # Generated code must be `zig fmt` clean. A dependent checks its own
+        # tree with `zig fmt --check`, and these files land in it.
+        fmt = subprocess.run(
+            ["zig", "fmt", "--check", str(zig_file)],
+            capture_output=True,
+            text=True,
+            cwd=self.workdir,
+            env=env,
+        )
+        if fmt.returncode != 0:
+            raise AssertionError(
+                f"generated code is not `zig fmt` clean for template:\n{template}\n\n"
+                f"Generated code:\n{zig_file.read_text()}"
+            )
+
         return result.stdout
 
 

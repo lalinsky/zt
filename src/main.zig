@@ -52,11 +52,27 @@ fn compileTemplate(allocator: std.mem.Allocator, io: std.Io, input_path: []const
         return error.GenerateFailed;
     };
 
-    const generated = output.writer.buffer[0..output.writer.end];
+    const raw = output.writer.buffer[0..output.writer.end];
+
+    // Run the result through zig's own formatter so the file we write is
+    // `zig fmt` clean. On a parse error we write the unformatted source
+    // anyway: the compiler's diagnostics on the real file beat anything we
+    // could say here, and the file has to exist for it to point at.
+    const generated = formatZig(alloc, raw) catch |err| blk: {
+        std.debug.print("{s}: warning: generated code did not format ({}), writing as-is\n", .{ output_path, err });
+        break :blk raw;
+    };
 
     // Write output
     std.Io.Dir.cwd().writeFile(io, .{ .sub_path = output_path, .data = generated }) catch |err| {
         std.debug.print("Error writing '{s}': {}\n", .{ output_path, err });
         return error.WriteFailed;
     };
+}
+
+fn formatZig(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
+    const source_z = try allocator.dupeZ(u8, source);
+    var tree = try std.zig.Ast.parse(allocator, source_z, .zig);
+    if (tree.errors.len > 0) return error.InvalidZig;
+    return tree.renderAlloc(allocator);
 }
