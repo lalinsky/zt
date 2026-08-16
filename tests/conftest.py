@@ -153,9 +153,9 @@ class ZtRunner:
 const std = @import("std");
 const tpl = @import("tpl.zig");
 
-pub fn main() !void {{
+pub fn main(init: std.process.Init) !void {{
     var buf: [8192]u8 = undefined;
-    var stdout = std.fs.File.stdout().writer(&buf);
+    var stdout = std.Io.File.stdout().writer(init.io, &buf);
     const w = &stdout.interface;
     try tpl.run.render({args}, w);
     try w.flush();

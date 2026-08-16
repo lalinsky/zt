@@ -2,8 +2,6 @@ const std = @import("std");
 const zt = @import("zt.zig");
 
 pub fn main(init: std.process.Init) !void {
-    const allocator = init.arena.allocator();
-
     const args = try init.minimal.args.toSlice(init.arena.allocator());
 
     if (args.len < 3 or args.len % 2 != 1) {
@@ -13,7 +11,7 @@ pub fn main(init: std.process.Init) !void {
 
     var i: usize = 1;
     while (i < args.len) : (i += 2) {
-        try compileTemplate(allocator, init.io, args[i], args[i + 1]);
+        try compileTemplate(init.gpa, init.io, args[i], args[i + 1]);
     }
 }
 
