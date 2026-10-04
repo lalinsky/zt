@@ -18,6 +18,8 @@ overhead at runtime. Output is directly written to a `std.Io.Writer`, so there i
 
 ## Installation
 
+zt supports Zig 0.16 and 0.17. Both versions are tested in CI.
+
 ```bash
 zig fetch --save git+https://github.com/lalinsky/zt
 ```

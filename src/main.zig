@@ -71,8 +71,8 @@ fn compileTemplate(allocator: std.mem.Allocator, io: std.Io, input_path: []const
 }
 
 fn formatZig(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
-    const source_z = try allocator.dupeZ(u8, source);
-    var tree = try std.zig.Ast.parse(allocator, source_z, .zig);
+    const source_z = try allocator.dupeSentinel(u8, source, 0);
+    var tree = try std.zig.Ast.parse(allocator, source_z, if (comptime @hasDecl(std.zig.Ast, "ParseOptions")) .{} else .zig);
     if (tree.errors.len > 0) return error.InvalidZig;
     return tree.renderAlloc(allocator);
 }
