@@ -24,7 +24,9 @@ pub fn build(b: *std.Build) void {
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
+    if (comptime @hasDecl(std.Build.Step.Run, "addPassthruArgs")) {
+        run_cmd.addPassthruArgs();
+    } else if (b.args) |args| {
         run_cmd.addArgs(args);
     }
     const run_step = b.step("run", "Run zt-compile");
