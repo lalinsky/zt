@@ -39,18 +39,20 @@ fn compileTemplate(allocator: std.mem.Allocator, io: std.Io, input_path: []const
 
     // Generate
     var output: std.Io.Writer.Allocating = .init(alloc);
-    try output.writer.writeAll("// Auto-generated from ");
-    try output.writer.writeAll(std.fs.path.basename(input_path));
-    try output.writer.writeAll(" - do not edit\n");
-    try output.writer.writeAll("const std = @import(\"std\");\n");
-    try output.writer.writeAll("const zt = @import(\"zt\");\n\n");
-
     var gen = zt.Generator.init(&output.writer);
     gen.source_file = std.fs.path.basename(input_path);
     gen.generateFile(file) catch |err| {
         std.debug.print("Error generating code: {}\n", .{err});
         return error.GenerateFailed;
     };
+
+    // The preamble goes at the end, so that the Zig code at the top of the
+    // template keeps its line numbers in the generated file.
+    try output.writer.writeAll("const std = @import(\"std\");\n");
+    try output.writer.writeAll("const zt = @import(\"zt\");\n\n");
+    try output.writer.writeAll("// AUTO-GENERATED FROM ");
+    try output.writer.writeAll(std.fs.path.basename(input_path));
+    try output.writer.writeAll(" - DO NOT EDIT\n");
 
     const raw = output.writer.buffer[0..output.writer.end];
 

@@ -199,6 +199,7 @@ pub const Parser = struct {
         const name = try self.parseIdentifier();
         self.skipWhitespace();
 
+        const loc = self.location();
         if (!self.match("(")) return self.fail("expected '(' after template name", .{});
         const params = try self.parseParameters();
         if (!self.match(")")) return self.fail("expected ')' after template parameters", .{});
@@ -211,6 +212,7 @@ pub const Parser = struct {
             .params = params,
             .is_public = is_public,
             .body = body,
+            .loc = loc,
         };
     }
 
@@ -503,6 +505,7 @@ pub const Parser = struct {
     }
 
     fn parseAttribute(self: *Parser) Error!ast.Attribute {
+        const loc = self.location();
         const name = try self.parseAttributeName();
         self.skipSpaces();
 
@@ -512,12 +515,12 @@ pub const Parser = struct {
             if (!self.match("{")) return self.fail("expected '{{' after '?='", .{});
             const expr = try self.parseZigCodeBalanced(0);
             if (!self.match("}")) return self.fail("expected '}}' to close conditional attribute", .{});
-            return .{ .name = name, .value = .{ .conditional = expr } };
+            return .{ .name = name, .value = .{ .conditional = expr }, .loc = loc };
         }
 
         // Boolean attribute (no value)
         if (self.peek() != @as(u8, '=')) {
-            return .{ .name = name, .value = .none };
+            return .{ .name = name, .value = .none, .loc = loc };
         }
 
         _ = self.match("=");
@@ -530,7 +533,7 @@ pub const Parser = struct {
             _ = self.advance(); // consume {
             const expr = try self.parseZigCodeBalanced(0);
             if (!self.match("}")) return self.fail("expected '}}' to close dynamic attribute", .{});
-            return .{ .name = name, .value = .{ .dynamic = expr } };
+            return .{ .name = name, .value = .{ .dynamic = expr }, .loc = loc };
         }
 
         // Quoted attribute: attr="value" or attr='value'
@@ -539,7 +542,7 @@ pub const Parser = struct {
             const quote = self.advance().?;
             const value = try self.parseQuotedAttrValue(quote);
             _ = self.advance(); // consume closing quote
-            return .{ .name = name, .value = value };
+            return .{ .name = name, .value = value, .loc = loc };
         }
 
         return self.fail("expected '\"', \"'\", or '{{' for attribute value", .{});
@@ -846,6 +849,7 @@ pub const Parser = struct {
         self.skipWhitespace();
 
         var else_capture: ?[]const u8 = null;
+        const else_loc = self.location();
         const else_body: ?[]const ast.Node = if (self.match("else")) blk: {
             self.skipWhitespace();
             // Optional else capture: else |err|
@@ -865,7 +869,7 @@ pub const Parser = struct {
             break :blk null;
         };
 
-        return .{ .condition = condition, .capture = capture, .then_body = then_body, .else_capture = else_capture, .else_body = else_body, .loc = loc };
+        return .{ .condition = condition, .capture = capture, .then_body = then_body, .else_capture = else_capture, .else_body = else_body, .loc = loc, .else_loc = else_loc };
     }
 
     // =========================================================================
@@ -914,6 +918,7 @@ pub const Parser = struct {
     }
 
     fn parseSwitchCase(self: *Parser) Error!ast.SwitchCase {
+        const loc = self.location();
         const pattern = try self.parseSwitchPattern();
         self.skipSpaces();
         if (!self.match("=>")) return self.fail("expected '=>' after switch pattern", .{});
@@ -930,7 +935,7 @@ pub const Parser = struct {
         else
             .{ .branch = try self.parseBranch() };
 
-        return .{ .pattern = pattern, .capture = capture, .body = body };
+        return .{ .pattern = pattern, .capture = capture, .body = body, .loc = loc };
     }
 
     fn parseSwitchPattern(self: *Parser) Error![]const u8 {
@@ -975,6 +980,7 @@ pub const Parser = struct {
     }
 
     fn parseSwitchBranch(self: *Parser) Error!ast.SwitchBranch {
+        const loc = self.location();
         const pattern = try self.parseSwitchPattern();
         self.skipWhitespace();
         if (!self.match("=>")) return self.fail("expected '=>' after switch pattern", .{});
@@ -986,7 +992,7 @@ pub const Parser = struct {
             null;
 
         self.skipWhitespace();
-        return .{ .pattern = pattern, .capture = capture, .body = try self.parseSwitchBranchBody() };
+        return .{ .pattern = pattern, .capture = capture, .body = try self.parseSwitchBranchBody(), .loc = loc };
     }
 
     // =========================================================================

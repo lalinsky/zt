@@ -17,6 +17,7 @@ pub const Template = struct {
     params: []const Parameter,
     is_public: bool,
     body: []const Node,
+    loc: Location = .{},
 };
 
 pub const Node = union(enum) {
@@ -42,6 +43,7 @@ pub const Element = struct {
 pub const Attribute = struct {
     name: []const u8,
     value: Value,
+    loc: Location = .{},
 
     pub const Value = union(enum) {
         static: []const u8, // class="foo"
@@ -125,6 +127,7 @@ pub const IfStatement = struct {
     else_capture: ?[]const u8 = null,
     else_body: ?[]const Node,
     loc: Location = .{},
+    else_loc: Location = .{},
 };
 
 /// Block-level: for (iter) |capture| { ... }
@@ -147,6 +150,7 @@ pub const SwitchCase = struct {
     pattern: []const u8, // ".active", "else", ".foo, .bar", etc.
     capture: ?[]const u8, // |val| capture if present
     body: Body,
+    loc: Location = .{},
 
     pub const Body = union(enum) {
         nodes: []const Node, // { ... } block with multiple nodes
@@ -165,6 +169,7 @@ pub const SwitchBranch = struct {
     pattern: []const u8,
     capture: ?[]const u8,
     body: Branch,
+    loc: Location = .{},
 };
 
 pub const Location = struct {
