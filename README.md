@@ -209,13 +209,20 @@ All HTML elements must be explicitly closed, but void elements like `<img>` and 
 <div class="container" id="main"></div>
 ```
 
+Single-quoted values are always static, so `{` has no special meaning inside them. Use them for JSON or JavaScript object literals:
+
+```zig
+<meta name="htmx-config" content='{"noSwap": [204, 304, "5xx"]}' />
+<div x-data='{ open: false }'></div>
+```
+
 **Dynamic** - Zig expressions in braces:
 
 ```zig
 <div class={className} data-id={item.id}></div>
 ```
 
-**Interpolated** - mix static and dynamic parts:
+**Interpolated** - mix static and dynamic parts (double quotes only):
 
 ```zig
 <a href="/posts/{post.id}/{post.slug}">Read more</a>

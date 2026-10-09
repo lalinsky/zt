@@ -305,11 +305,7 @@ pub const Generator = struct {
             for (elem.attributes) |attr| {
                 switch (attr.value) {
                     .static => |val| {
-                        try self.output.writeAll(" ");
-                        try self.output.writeAll(attr.name);
-                        try self.output.writeAll("=\\\"");
-                        try self.writeEscapedForZig(val);
-                        try self.output.writeAll("\\\"");
+                        try self.writeStaticAttr(attr.name, val);
                     },
                     .none => {
                         try self.output.writeAll(" ");
@@ -337,11 +333,9 @@ pub const Generator = struct {
                 switch (attr.value) {
                     .static => |val| {
                         try self.writeIndent();
-                        try self.output.writeAll("try writer.writeAll(\" ");
-                        try self.output.writeAll(attr.name);
-                        try self.output.writeAll("=\\\"");
-                        try self.writeEscapedForZig(val);
-                        try self.output.writeAll("\\\"\");\n");
+                        try self.output.writeAll("try writer.writeAll(\"");
+                        try self.writeStaticAttr(attr.name, val);
+                        try self.output.writeAll("\");\n");
                     },
                     .none => {
                         try self.writeIndent();
@@ -830,6 +824,19 @@ pub const Generator = struct {
         for (0..self.indent) |_| {
             try self.output.writeAll("    ");
         }
+    }
+
+    /// Writes ` name="value"` into a Zig string literal. A value containing `"`
+    /// came from a single-quoted attribute and can't contain `'`, so it keeps
+    /// single quotes.
+    fn writeStaticAttr(self: *Generator, name: []const u8, value: []const u8) std.Io.Writer.Error!void {
+        const quote = if (std.mem.indexOfScalar(u8, value, '"') != null) "'" else "\\\"";
+        try self.output.writeAll(" ");
+        try self.output.writeAll(name);
+        try self.output.writeAll("=");
+        try self.output.writeAll(quote);
+        try self.writeEscapedForZig(value);
+        try self.output.writeAll(quote);
     }
 
     fn writeEscapedForZig(self: *Generator, str: []const u8) std.Io.Writer.Error!void {

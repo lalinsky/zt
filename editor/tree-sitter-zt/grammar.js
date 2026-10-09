@@ -125,7 +125,7 @@ module.exports = grammar({
         "=",
         choice(
           seq('"', repeat(choice($.attr_static_part, $.attr_interpolation)), '"'),
-          seq("'", repeat(choice($.attr_static_part_sq, $.attr_interpolation)), "'")
+          seq("'", optional($.attr_static_part_sq), "'")
         )
       ),
 
@@ -138,7 +138,7 @@ module.exports = grammar({
     attribute_name: (_) => /[@A-Za-z_][A-Za-z0-9\-_:.@]*/,
 
     attr_static_part: (_) => /[^{}"]+/,
-    attr_static_part_sq: (_) => /[^{}']+/,
+    attr_static_part_sq: (_) => /[^']+/,
     attr_interpolation: ($) => seq("{", $.zig_expr_free, "}"),
 
     // -------------------------------------------------------------------------
