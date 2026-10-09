@@ -24,7 +24,7 @@ pub const Generator = struct {
     indent: usize,
     children_call_index: usize = 0,
     source_file: []const u8 = "",
-    last_emitted_line: usize = 0,
+    template_loc: ast.Location = .{},
 
     pub fn init(output: *std.Io.Writer) Generator {
         return .{
@@ -49,6 +49,8 @@ pub const Generator = struct {
     pub fn generate(self: *Generator, template: ast.Template) std.Io.Writer.Error!void {
         const has_children_param = bodyUsesChildren(template.body);
         const num_children_calls = countChildrenCalls(template.body);
+
+        self.template_loc = template.loc;
 
         // Phase 1: Generate inner structs for component calls with children
         if (num_children_calls > 0) {
@@ -84,7 +86,8 @@ pub const Generator = struct {
         if (template.params.len > 0 or has_children_param or num_children_calls > 0) {
             try self.output.writeAll(", ");
         }
-        try self.output.writeAll("writer: *std.Io.Writer) std.Io.Writer.Error!void {\n");
+        try self.output.writeAll("writer: *std.Io.Writer) std.Io.Writer.Error!void {");
+        try self.endParamsLine(template.params);
 
         self.indent += 1;
         if (template.params.len > 0) try self.writeParamDiscards(template.params);
@@ -105,7 +108,9 @@ pub const Generator = struct {
             if (template.params.len > 0) try self.output.writeAll(", ");
             try self.output.writeAll("_: zt.Component");
         }
-        try self.output.writeAll(") void {}\n\n");
+        try self.output.writeAll(") void {}");
+        try self.endParamsLine(template.params);
+        try self.output.writeAll("\n");
 
         // Args, render, bind
         try self.writeArgsRenderBind(template.name, num_children_calls);
@@ -237,7 +242,8 @@ pub const Generator = struct {
             try self.output.writeAll(": zt.Component");
         }
         if (params.len > 0 or num_children_calls > 0) try self.output.writeAll(", ");
-        try self.output.writeAll("writer: *std.Io.Writer) std.Io.Writer.Error!void {\n");
+        try self.output.writeAll("writer: *std.Io.Writer) std.Io.Writer.Error!void {");
+        try self.endParamsLine(params);
         self.indent += 1;
         if (params.len > 0) try self.writeParamDiscards(params);
         const saved_index = self.children_call_index;
@@ -254,7 +260,9 @@ pub const Generator = struct {
         try self.writeIndent();
         try self.output.writeAll("fn _signature(");
         try self.writeAnonymizedParams(params);
-        try self.output.writeAll(") void {}\n\n");
+        try self.output.writeAll(") void {}");
+        try self.endParamsLine(params);
+        try self.output.writeAll("\n");
 
         // Args, render, bind
         try self.writeArgsRenderBind(name, num_children_calls);
@@ -276,16 +284,17 @@ pub const Generator = struct {
         }
     }
 
-    fn writeSourceLoc(self: *Generator, loc: ast.Location) std.Io.Writer.Error!void {
-        if (self.source_file.len == 0 or loc.line == 0) return;
-        if (loc.line == self.last_emitted_line) return;
-        self.last_emitted_line = loc.line;
-        try self.writeIndent();
-        try self.output.print("// {s}:{d}\n", .{ self.source_file, loc.line });
+    /// End a line that contains user code with a comment pointing back to the
+    /// template source. Zig prints the offending line in compile errors and
+    /// stack traces, so the comment shows up right there.
+    fn endLine(self: *Generator, loc: ast.Location) std.Io.Writer.Error!void {
+        if (self.source_file.len > 0 and loc.line > 0) {
+            try self.output.print(" // {s}:{d}:{d}", .{ self.source_file, loc.line, loc.column });
+        }
+        try self.output.writeAll("\n");
     }
 
     fn generateElement(self: *Generator, elem: ast.Element) std.Io.Writer.Error!void {
-        try self.writeSourceLoc(elem.loc);
         // Check if we have any dynamic attributes
         var has_dynamic = false;
         for (elem.attributes) |attr| {
@@ -349,7 +358,8 @@ pub const Generator = struct {
                         try self.output.writeAll(attr.name);
                         try self.output.writeAll("\", ");
                         try self.output.writeAll(expr);
-                        try self.output.writeAll(");\n");
+                        try self.output.writeAll(");");
+                        try self.endLine(attr.loc);
                     },
                     .conditional => |expr| {
                         try self.writeIndent();
@@ -357,7 +367,8 @@ pub const Generator = struct {
                         try self.output.writeAll(attr.name);
                         try self.output.writeAll("\", ");
                         try self.output.writeAll(expr);
-                        try self.output.writeAll(");\n");
+                        try self.output.writeAll(");");
+                        try self.endLine(attr.loc);
                     },
                     .interpolated => |parts| {
                         try self.writeIndent();
@@ -376,7 +387,8 @@ pub const Generator = struct {
                                     try self.writeIndent();
                                     try self.output.writeAll("try zt.writeEscaped(writer, ");
                                     try self.output.writeAll(expr);
-                                    try self.output.writeAll(");\n");
+                                    try self.output.writeAll(");");
+                                    try self.endLine(attr.loc);
                                 },
                             }
                         }
@@ -406,7 +418,6 @@ pub const Generator = struct {
         }
 
         // Closing tag
-        try self.writeSourceLoc(elem.end_loc);
         try self.writeIndent();
         try self.output.writeAll("try writer.writeAll(\"</");
         try self.output.writeAll(elem.tag);
@@ -430,26 +441,16 @@ pub const Generator = struct {
     }
 
     fn generateExpr(self: *Generator, expr: ast.Expr) std.Io.Writer.Error!void {
-        try self.writeSourceLoc(expr.loc);
         switch (expr.content) {
-            .zig_code => |code| {
-                try self.writeIndent();
-                if (expr.raw) {
-                    try self.output.writeAll("try zt.writeRaw(writer, ");
-                } else {
-                    try self.output.writeAll("try zt.writeEscaped(writer, ");
-                }
-                try self.output.writeAll(code);
-                try self.output.writeAll(");\n");
-            },
-            .if_expr => |if_expr| try self.generateIfExpr(if_expr, expr.raw),
-            .for_expr => |for_expr| try self.generateForExpr(for_expr, expr.raw),
-            .switch_expr => |switch_expr| try self.generateSwitchExpr(switch_expr, expr.raw),
+            .zig_code => |code| try self.generateZigCode(code, expr.raw, expr.loc),
+            .if_expr => |if_expr| try self.generateIfExpr(if_expr, expr.raw, expr.loc),
+            .for_expr => |for_expr| try self.generateForExpr(for_expr, expr.raw, expr.loc),
+            .switch_expr => |switch_expr| try self.generateSwitchExpr(switch_expr, expr.raw, expr.loc),
             .element => |elem| try self.generateElement(elem.*),
         }
     }
 
-    fn generateIfExpr(self: *Generator, if_expr: ast.IfExpr, raw: bool) std.Io.Writer.Error!void {
+    fn generateIfExpr(self: *Generator, if_expr: ast.IfExpr, raw: bool, loc: ast.Location) std.Io.Writer.Error!void {
         try self.writeIndent();
         try self.output.writeAll("if (");
         try self.output.writeAll(if_expr.condition);
@@ -459,10 +460,11 @@ pub const Generator = struct {
             try self.output.writeAll(cap);
             try self.output.writeAll("|");
         }
-        try self.output.writeAll(" {\n");
+        try self.output.writeAll(" {");
+        try self.endLine(loc);
 
         self.indent += 1;
-        try self.generateBranch(if_expr.then_branch, raw);
+        try self.generateBranch(if_expr.then_branch, raw, loc);
         self.indent -= 1;
 
         if (if_expr.else_branch) |else_branch| {
@@ -473,9 +475,10 @@ pub const Generator = struct {
                 try self.output.writeAll(cap);
                 try self.output.writeAll("|");
             }
-            try self.output.writeAll(" {\n");
+            try self.output.writeAll(" {");
+            try self.endLine(if (if_expr.else_capture != null) loc else .{});
             self.indent += 1;
-            try self.generateBranch(else_branch, raw);
+            try self.generateBranch(else_branch, raw, loc);
             self.indent -= 1;
         }
 
@@ -483,47 +486,50 @@ pub const Generator = struct {
         try self.output.writeAll("}\n");
     }
 
-    fn generateForExpr(self: *Generator, for_expr: ast.ForExpr, raw: bool) std.Io.Writer.Error!void {
+    fn generateForExpr(self: *Generator, for_expr: ast.ForExpr, raw: bool, loc: ast.Location) std.Io.Writer.Error!void {
         try self.writeIndent();
         try self.output.writeAll("for (");
         try self.output.writeAll(for_expr.iterable);
         try self.output.writeAll(") |");
         try self.output.writeAll(for_expr.captures);
-        try self.output.writeAll("| {\n");
+        try self.output.writeAll("| {");
+        try self.endLine(loc);
 
         self.indent += 1;
-        try self.generateBranch(for_expr.body, raw);
+        try self.generateBranch(for_expr.body, raw, loc);
         self.indent -= 1;
 
         try self.writeIndent();
         try self.output.writeAll("}\n");
     }
 
-    fn generateBranch(self: *Generator, branch: ast.Branch, raw: bool) std.Io.Writer.Error!void {
+    fn generateBranch(self: *Generator, branch: ast.Branch, raw: bool, loc: ast.Location) std.Io.Writer.Error!void {
         switch (branch) {
             .element => |elem| try self.generateElement(elem.*),
             .component_call => |call| try self.generateComponentCall(call),
-            .if_expr => |if_expr| try self.generateIfExpr(if_expr.*, raw),
+            .if_expr => |if_expr| try self.generateIfExpr(if_expr.*, raw, loc),
             .nodes => |nodes| {
                 for (nodes) |node| {
                     try self.generateNode(node);
                 }
             },
-            .zig_code => |code| {
-                try self.writeIndent();
-                if (raw) {
-                    try self.output.writeAll("try zt.writeRaw(writer, ");
-                } else {
-                    try self.output.writeAll("try zt.writeEscaped(writer, ");
-                }
-                try self.output.writeAll(code);
-                try self.output.writeAll(");\n");
-            },
+            .zig_code => |code| try self.generateZigCode(code, raw, loc),
         }
     }
 
+    fn generateZigCode(self: *Generator, code: []const u8, raw: bool, loc: ast.Location) std.Io.Writer.Error!void {
+        try self.writeIndent();
+        if (raw) {
+            try self.output.writeAll("try zt.writeRaw(writer, ");
+        } else {
+            try self.output.writeAll("try zt.writeEscaped(writer, ");
+        }
+        try self.output.writeAll(code);
+        try self.output.writeAll(");");
+        try self.endLine(loc);
+    }
+
     fn generateComponentCall(self: *Generator, call: ast.ComponentCall) std.Io.Writer.Error!void {
-        try self.writeSourceLoc(call.loc);
         try self.writeIndent();
         try self.output.writeAll("try zt.renderComponent(");
         try self.output.writeAll(call.name);
@@ -537,11 +543,11 @@ pub const Generator = struct {
             try self.writeChildrenParamName(self.children_call_index);
             self.children_call_index += 1;
         }
-        try self.output.writeAll("}, writer);\n");
+        try self.output.writeAll("}, writer);");
+        try self.endLine(call.loc);
     }
 
     fn generateIfStmt(self: *Generator, stmt: ast.IfStatement) std.Io.Writer.Error!void {
-        try self.writeSourceLoc(stmt.loc);
         try self.writeIndent();
         try self.output.writeAll("if (");
         try self.output.writeAll(stmt.condition);
@@ -551,7 +557,8 @@ pub const Generator = struct {
             try self.output.writeAll(cap);
             try self.output.writeAll("|");
         }
-        try self.output.writeAll(" {\n");
+        try self.output.writeAll(" {");
+        try self.endLine(stmt.loc);
 
         self.indent += 1;
         for (stmt.then_body) |node| {
@@ -574,7 +581,8 @@ pub const Generator = struct {
                 try self.output.writeAll(cap);
                 try self.output.writeAll("|");
             }
-            try self.output.writeAll(" {\n");
+            try self.output.writeAll(" {");
+            try self.endLine(if (stmt.else_capture != null) stmt.else_loc else .{});
             self.indent += 1;
             for (else_body) |node| {
                 try self.generateNode(node);
@@ -596,7 +604,8 @@ pub const Generator = struct {
             try self.output.writeAll(cap);
             try self.output.writeAll("|");
         }
-        try self.output.writeAll(" {\n");
+        try self.output.writeAll(" {");
+        try self.endLine(stmt.loc);
 
         self.indent += 1;
         for (stmt.then_body) |node| {
@@ -618,7 +627,8 @@ pub const Generator = struct {
                 try self.output.writeAll(cap);
                 try self.output.writeAll("|");
             }
-            try self.output.writeAll(" {\n");
+            try self.output.writeAll(" {");
+            try self.endLine(if (stmt.else_capture != null) stmt.else_loc else .{});
             self.indent += 1;
             for (else_body) |node| {
                 try self.generateNode(node);
@@ -631,13 +641,13 @@ pub const Generator = struct {
     }
 
     fn generateForStmt(self: *Generator, stmt: ast.ForStatement) std.Io.Writer.Error!void {
-        try self.writeSourceLoc(stmt.loc);
         try self.writeIndent();
         try self.output.writeAll("for (");
         try self.output.writeAll(stmt.iterable);
         try self.output.writeAll(") |");
         try self.output.writeAll(stmt.captures);
-        try self.output.writeAll("| {\n");
+        try self.output.writeAll("| {");
+        try self.endLine(stmt.loc);
 
         self.indent += 1;
         for (stmt.body) |node| {
@@ -650,11 +660,11 @@ pub const Generator = struct {
     }
 
     fn generateSwitchStmt(self: *Generator, stmt: ast.SwitchStatement) std.Io.Writer.Error!void {
-        try self.writeSourceLoc(stmt.loc);
         try self.writeIndent();
         try self.output.writeAll("switch (");
         try self.output.writeAll(stmt.value);
-        try self.output.writeAll(") {\n");
+        try self.output.writeAll(") {");
+        try self.endLine(stmt.loc);
 
         self.indent += 1;
         for (stmt.cases) |case| {
@@ -666,7 +676,8 @@ pub const Generator = struct {
                 try self.output.writeAll(cap);
                 try self.output.writeAll("| ");
             }
-            try self.output.writeAll("{\n");
+            try self.output.writeAll("{");
+            try self.endLine(case.loc);
 
             self.indent += 1;
             switch (case.body) {
@@ -675,7 +686,7 @@ pub const Generator = struct {
                         try self.generateNode(node);
                     }
                 },
-                .branch => |branch| try self.generateBranch(branch, false),
+                .branch => |branch| try self.generateBranch(branch, false, case.loc),
             }
             self.indent -= 1;
 
@@ -688,11 +699,12 @@ pub const Generator = struct {
         try self.output.writeAll("}\n");
     }
 
-    fn generateSwitchExpr(self: *Generator, expr: ast.SwitchExpr, raw: bool) std.Io.Writer.Error!void {
+    fn generateSwitchExpr(self: *Generator, expr: ast.SwitchExpr, raw: bool, loc: ast.Location) std.Io.Writer.Error!void {
         try self.writeIndent();
         try self.output.writeAll("switch (");
         try self.output.writeAll(expr.value);
-        try self.output.writeAll(") {\n");
+        try self.output.writeAll(") {");
+        try self.endLine(loc);
 
         self.indent += 1;
         for (expr.cases) |case| {
@@ -704,10 +716,11 @@ pub const Generator = struct {
                 try self.output.writeAll(cap);
                 try self.output.writeAll("| ");
             }
-            try self.output.writeAll("{\n");
+            try self.output.writeAll("{");
+            try self.endLine(case.loc);
 
             self.indent += 1;
-            try self.generateBranch(case.body, raw);
+            try self.generateBranch(case.body, raw, case.loc);
             self.indent -= 1;
 
             try self.writeIndent();
@@ -789,6 +802,11 @@ pub const Generator = struct {
             }
         }
         return count;
+    }
+
+    /// End a line containing the template parameters.
+    fn endParamsLine(self: *Generator, params: []const ast.Parameter) std.Io.Writer.Error!void {
+        try self.endLine(if (params.len > 0) self.template_loc else .{});
     }
 
     /// Write `_ = &name;` for each param to suppress unused parameter errors.
@@ -1174,4 +1192,38 @@ test "generate void elements without closing slash" {
     try std.testing.expect(std.mem.indexOf(u8, result, "</br>") == null);
     // But regular elements should still have closing tags
     try std.testing.expect(std.mem.indexOf(u8, result, "</head>") != null);
+}
+
+test "generate source location comments on user code lines" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const parser = @import("parser.zig");
+
+    const source =
+        \\templ test(items: []const Item) {
+        \\    <ul class="list">
+        \\        for (items) |item| {
+        \\            <li id={item.id}>{item.name}</li>
+        \\        }
+        \\    </ul>
+        \\}
+    ;
+
+    var p = parser.Parser.init(arena.allocator(), source);
+    const template = try p.parseTemplate();
+
+    var output: std.Io.Writer.Allocating = .init(arena.allocator());
+    var gen = Generator.init(&output.writer);
+    gen.source_file = "test.zt";
+    try gen.generate(template);
+
+    const result = output.writer.buffer[0..output.writer.end];
+    try std.testing.expect(std.mem.indexOf(u8, result, "std.Io.Writer.Error!void { // test.zt:1:11\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "for (items) |item| { // test.zt:3:9\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAttr(writer, \"id\", item.id); // test.zt:4:17\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeEscaped(writer, item.name); // test.zt:4:30\n") != null);
+    // Static markup we generate ourselves is not annotated
+    try std.testing.expect(std.mem.indexOf(u8, result, "try writer.writeAll(\"<ul class=\\\"list\\\">\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try writer.writeAll(\"</li>\");\n") != null);
 }
