@@ -1,6 +1,9 @@
 # Zig Templating
 
-*This is still an experimental project. Feedback is welcome, but use with caution.*
+*This is a young project. The syntax is mostly settled, but one breaking change is still under
+discussion: how block-level control flow is written ([#27]). Feedback is very welcome, especially there.*
+
+[#27]: https://github.com/lalinsky/zt/issues/27
 
 A small HTML templating language that compiles to Zig at build-time.
 Inspired by [Templ], [Zeix] and [JSX].
