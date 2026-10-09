@@ -11,13 +11,20 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // CLI tool
+    // CLI tool. It runs on the build machine while compiling templates, so it is
+    // always built for the host. Its optimize mode is separate from `optimize`,
+    // because a debug build compiles much faster and is fast enough to run.
+    const tool_optimize = b.option(
+        std.builtin.OptimizeMode,
+        "tool_optimize",
+        "Optimize mode for zt-compile (default: debug)",
+    ) orelse debug_mode;
     const exe = b.addExecutable(.{
         .name = "zt-compile",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
+            .target = b.graph.host,
+            .optimize = tool_optimize,
         }),
     });
     b.installArtifact(exe);
@@ -45,6 +52,9 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
 }
+
+// Zig 0.17 renamed the OptimizeMode tags to lowercase.
+const debug_mode: std.builtin.OptimizeMode = if (@hasField(std.builtin.OptimizeMode, "debug")) .debug else .Debug;
 
 // =============================================================================
 // Build helpers for dependents

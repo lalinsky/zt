@@ -61,6 +61,16 @@ pub fn build(b: *std.Build) void {
 }
 ```
 
+The template compiler is built in debug mode by default. To build it optimized, pass `tool_optimize`:
+
+```zig
+const zt_dep = b.dependency("zt", .{
+    .target = target,
+    .optimize = optimize,
+    .tool_optimize = .fast,
+});
+```
+
 ## Usage
 
 ```zig
