@@ -145,9 +145,19 @@ fn writeFormatted(writer: *std.Io.Writer, value: anytype) std.Io.Writer.Error!vo
 }
 
 /// Writes an attribute, skipping it entirely if the value is null.
+/// A bool value is treated as an HTML boolean attribute: `true` writes the
+/// bare name and `false` skips it.
 pub fn writeAttr(writer: *std.Io.Writer, name: []const u8, value: anytype) std.Io.Writer.Error!void {
     const T = @TypeOf(value);
     const v = if (@typeInfo(T) == .optional) value orelse return else value;
+
+    if (@TypeOf(v) == bool) {
+        if (v) {
+            try writer.writeAll(" ");
+            try writer.writeAll(name);
+        }
+        return;
+    }
 
     try writer.writeAll(" ");
     try writer.writeAll(name);
@@ -252,6 +262,35 @@ test "writeAttr with null skips attribute" {
     const maybe: ?[]const u8 = null;
     try writeAttr(&output.writer, "class", maybe);
     try std.testing.expectEqualStrings("", output.writer.buffer[0..output.writer.end]);
+}
+
+test "writeAttr with true writes bare attribute" {
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+
+    try writeAttr(&output.writer, "checked", true);
+    try std.testing.expectEqualStrings(" checked", output.writer.buffer[0..output.writer.end]);
+}
+
+test "writeAttr with false skips attribute" {
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+
+    try writeAttr(&output.writer, "checked", false);
+    try std.testing.expectEqualStrings("", output.writer.buffer[0..output.writer.end]);
+}
+
+test "writeAttr with optional bool" {
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+
+    const yes: ?bool = true;
+    const no: ?bool = false;
+    const missing: ?bool = null;
+    try writeAttr(&output.writer, "a", yes);
+    try writeAttr(&output.writer, "b", no);
+    try writeAttr(&output.writer, "c", missing);
+    try std.testing.expectEqualStrings(" a", output.writer.buffer[0..output.writer.end]);
 }
 
 test "formatHtml is written raw" {
