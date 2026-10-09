@@ -48,11 +48,11 @@ fn compileTemplate(allocator: std.mem.Allocator, io: std.Io, input_path: []const
 
     // The preamble goes at the end, so that the Zig code at the top of the
     // template keeps its line numbers in the generated file.
-    try output.writer.writeAll("// Auto-generated from ");
-    try output.writer.writeAll(std.fs.path.basename(input_path));
-    try output.writer.writeAll(" - do not edit\n");
     try output.writer.writeAll("const std = @import(\"std\");\n");
-    try output.writer.writeAll("const zt = @import(\"zt\");\n");
+    try output.writer.writeAll("const zt = @import(\"zt\");\n\n");
+    try output.writer.writeAll("// AUTO-GENERATED FROM ");
+    try output.writer.writeAll(std.fs.path.basename(input_path));
+    try output.writer.writeAll(" - DO NOT EDIT\n");
 
     const raw = output.writer.buffer[0..output.writer.end];
 
