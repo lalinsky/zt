@@ -171,6 +171,63 @@ def test_dynamic_attr(zt):
     assert result == '<div class="foo"></div>'
 
 
+def test_single_quoted_attr_is_static(zt):
+    result = zt.run(
+        """pub templ run() { <meta content='{"noSwap": [204, "5xx"]}' /> }""",
+        expected_ast='''
+        (source_file
+          (template
+            (pub_keyword)
+            (templ_keyword)
+            (template_name
+              (name))
+            (template_body
+              (element
+                (self_closing_tag
+                  (tag_name)
+                  (attribute
+                    (quoted_attribute
+                      (attribute_name)
+                      (attr_static_part_sq))))))))
+        ''',
+    )
+    assert result == """<meta content='{"noSwap": [204, "5xx"]}'>"""
+
+
+def test_single_quoted_attr_with_dynamic_attr(zt):
+    result = zt.run(
+        """pub templ run(cls: []const u8) { <div class={cls} x-data='{ open: false }'></div> }""",
+        args='.{"foo"}',
+        expected_ast='''
+        (source_file
+          (template
+            (pub_keyword)
+            (templ_keyword)
+            (template_name
+              (name))
+            (parameter_list
+              (parameter
+                name: (name)
+                type: (type_expr)))
+            (template_body
+              (element
+                (open_tag
+                  (tag_name)
+                  (attribute
+                    (dynamic_attribute
+                      (attribute_name)
+                      (zig_expr_free)))
+                  (attribute
+                    (quoted_attribute
+                      (attribute_name)
+                      (attr_static_part_sq))))
+                (close_tag
+                  (tag_name))))))
+        ''',
+    )
+    assert result == '<div class="foo" x-data="{ open: false }"></div>'
+
+
 def test_optional_attr_present(zt):
     result = zt.run(
         'pub templ run(x: ?[]const u8) { <div class={x}></div> }',

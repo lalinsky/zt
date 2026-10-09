@@ -545,7 +545,8 @@ pub const Parser = struct {
         return self.fail("expected '\"', \"'\", or '{{' for attribute value", .{});
     }
 
-    /// Parse a quoted attribute value, which may contain interpolations like "prefix{expr}suffix"
+    /// Parse a quoted attribute value. Double-quoted values may contain interpolations
+    /// like "prefix{expr}suffix", single-quoted values are always static.
     fn parseQuotedAttrValue(self: *Parser, quote: u8) Error!ast.Attribute.Value {
         const start = self.pos;
 
@@ -555,7 +556,7 @@ pub const Parser = struct {
         while (scan_pos < self.source.len) {
             const ch = self.source[scan_pos];
             if (ch == quote) break;
-            if (ch == '{') {
+            if (ch == '{' and quote == '"') {
                 has_interpolation = true;
                 break;
             }
@@ -1592,6 +1593,25 @@ test "parse conditional attributes" {
 
     try std.testing.expectEqualStrings("disabled", input.attributes[2].name);
     try std.testing.expectEqualStrings("!done", input.attributes[2].value.conditional);
+}
+
+test "parse single-quoted attribute with braces as static" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test() {
+        \\    <meta content='{"noSwap": [204, "5xx"]}' x-data='{ open: false }' />
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const meta = template.body[0].element;
+    try std.testing.expectEqual(@as(usize, 2), meta.attributes.len);
+    try std.testing.expectEqualStrings("{\"noSwap\": [204, \"5xx\"]}", meta.attributes[0].value.static);
+    try std.testing.expectEqualStrings("{ open: false }", meta.attributes[1].value.static);
 }
 
 test "parse zig code with nested braces" {
