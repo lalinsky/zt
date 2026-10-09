@@ -231,6 +231,90 @@ def test_optional_attr_null(zt):
     assert result == '<div></div>'
 
 
+def test_bool_attr_true(zt):
+    result = zt.run(
+        'pub templ run(x: bool) { <input checked?={x} /> }',
+        args='.{true}',
+        expected_ast='''
+        (source_file
+          (template
+            (pub_keyword)
+            (templ_keyword)
+            (template_name
+              (name))
+            (parameter_list
+              (parameter
+                name: (name)
+                type: (type_expr)))
+            (template_body
+              (element
+                (self_closing_tag
+                  (tag_name)
+                  (attribute
+                    (conditional_attribute
+                      (attribute_name)
+                      (zig_expr_free))))))))
+        ''',
+    )
+    assert result == '<input checked>'
+
+
+def test_bool_attr_false(zt):
+    result = zt.run(
+        'pub templ run(x: bool) { <input checked?={x} /> }',
+        args='.{false}',
+        expected_ast='''
+        (source_file
+          (template
+            (pub_keyword)
+            (templ_keyword)
+            (template_name
+              (name))
+            (parameter_list
+              (parameter
+                name: (name)
+                type: (type_expr)))
+            (template_body
+              (element
+                (self_closing_tag
+                  (tag_name)
+                  (attribute
+                    (conditional_attribute
+                      (attribute_name)
+                      (zig_expr_free))))))))
+        ''',
+    )
+    assert result == '<input>'
+
+
+def test_optional_bool_attr_null(zt):
+    result = zt.run(
+        'pub templ run(x: ?bool) { <input checked?={x} /> }',
+        args='.{null}',
+        expected_ast='''
+        (source_file
+          (template
+            (pub_keyword)
+            (templ_keyword)
+            (template_name
+              (name))
+            (parameter_list
+              (parameter
+                name: (name)
+                type: (type_expr)))
+            (template_body
+              (element
+                (self_closing_tag
+                  (tag_name)
+                  (attribute
+                    (conditional_attribute
+                      (attribute_name)
+                      (zig_expr_free))))))))
+        ''',
+    )
+    assert result == '<input>'
+
+
 def test_zig_function_call(zt):
     result = zt.run('''
 fn double(x: i32) i32 {

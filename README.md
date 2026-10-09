@@ -227,6 +227,19 @@ All HTML elements must be explicitly closed, but void elements like `<img>` and 
 <input type="checkbox" checked disabled />
 ```
 
+**Conditional** - `?=` takes a `bool` (or `?bool`) and renders the bare attribute when it is true, nothing otherwise:
+
+```zig
+<input type="checkbox" checked?={item.done} />
+```
+
+A plain dynamic attribute rejects a `bool` at compile time, because `checked="false"` still means checked.
+For attributes that expect the strings `"true"`/`"false"` (`aria-expanded`, `draggable`, `hx-boost`, ...), pass a string:
+
+```zig
+<button aria-expanded={if (open) "true" else "false"}>Menu</button>
+```
+
 **Optional** - attribute omitted when value is null:
 
 ```zig

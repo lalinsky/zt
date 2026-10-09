@@ -10,6 +10,7 @@ pub const Component = @import("runtime.zig").Component;
 pub const writeEscaped = @import("runtime.zig").writeEscaped;
 pub const writeRaw = @import("runtime.zig").writeRaw;
 pub const writeAttr = @import("runtime.zig").writeAttr;
+pub const writeBoolAttr = @import("runtime.zig").writeBoolAttr;
 pub const renderComponent = @import("runtime.zig").renderComponent;
 
 test {
