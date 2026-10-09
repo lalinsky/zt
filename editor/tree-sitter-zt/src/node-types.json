@@ -27,6 +27,10 @@
           "named": true
         },
         {
+          "type": "conditional_attribute",
+          "named": true
+        },
+        {
           "type": "dynamic_attribute",
           "named": true
         },
@@ -355,6 +359,25 @@
         },
         {
           "type": "dotted_name",
+          "named": true
+        },
+        {
+          "type": "zig_expr_free",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "conditional_attribute",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "attribute_name",
           "named": true
         },
         {
@@ -1070,6 +1093,10 @@
   },
   {
     "type": ">",
+    "named": false
+  },
+  {
+    "type": "?=",
     "named": false
   },
   {

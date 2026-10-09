@@ -506,6 +506,15 @@ pub const Parser = struct {
         const name = try self.parseAttributeName();
         self.skipSpaces();
 
+        // Conditional boolean attribute: attr?={expr}
+        if (self.match("?=")) {
+            self.skipSpaces();
+            if (!self.match("{")) return self.fail("expected '{{' after '?='", .{});
+            const expr = try self.parseZigCodeBalanced(0);
+            if (!self.match("}")) return self.fail("expected '}}' to close conditional attribute", .{});
+            return .{ .name = name, .value = .{ .conditional = expr } };
+        }
+
         // Boolean attribute (no value)
         if (self.peek() != @as(u8, '=')) {
             return .{ .name = name, .value = .none };
@@ -1560,6 +1569,29 @@ test "parse boolean attributes" {
     const button = template.body[1].element;
     try std.testing.expectEqualStrings("disabled", button.attributes[0].name);
     try std.testing.expect(button.attributes[0].value == .none);
+}
+
+test "parse conditional attributes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\templ test(done: bool) {
+        \\    <input type="checkbox" checked?={done} disabled ?= { !done } />
+        \\}
+    ;
+
+    var parser = Parser.init(arena.allocator(), source);
+    const template = try parser.parseTemplate();
+
+    const input = template.body[0].element;
+    try std.testing.expectEqual(@as(usize, 3), input.attributes.len);
+
+    try std.testing.expectEqualStrings("checked", input.attributes[1].name);
+    try std.testing.expectEqualStrings("done", input.attributes[1].value.conditional);
+
+    try std.testing.expectEqualStrings("disabled", input.attributes[2].name);
+    try std.testing.expectEqualStrings("!done", input.attributes[2].value.conditional);
 }
 
 test "parse zig code with nested braces" {

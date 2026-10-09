@@ -289,7 +289,7 @@ pub const Generator = struct {
         // Check if we have any dynamic attributes
         var has_dynamic = false;
         for (elem.attributes) |attr| {
-            if (attr.value == .dynamic or attr.value == .interpolated) {
+            if (attr.value == .dynamic or attr.value == .interpolated or attr.value == .conditional) {
                 has_dynamic = true;
                 break;
             }
@@ -315,7 +315,7 @@ pub const Generator = struct {
                         try self.output.writeAll(" ");
                         try self.output.writeAll(attr.name);
                     },
-                    .dynamic, .interpolated => {},
+                    .dynamic, .interpolated, .conditional => {},
                 }
             }
 
@@ -352,6 +352,14 @@ pub const Generator = struct {
                     .dynamic => |expr| {
                         try self.writeIndent();
                         try self.output.writeAll("try zt.writeAttr(writer, \"");
+                        try self.output.writeAll(attr.name);
+                        try self.output.writeAll("\", ");
+                        try self.output.writeAll(expr);
+                        try self.output.writeAll(");\n");
+                    },
+                    .conditional => |expr| {
+                        try self.writeIndent();
+                        try self.output.writeAll("try zt.writeBoolAttr(writer, \"");
                         try self.output.writeAll(attr.name);
                         try self.output.writeAll("\", ");
                         try self.output.writeAll(expr);

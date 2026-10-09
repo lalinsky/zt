@@ -233,7 +233,7 @@ def test_optional_attr_null(zt):
 
 def test_bool_attr_true(zt):
     result = zt.run(
-        'pub templ run(x: bool) { <input checked={x} /> }',
+        'pub templ run(x: bool) { <input checked?={x} /> }',
         args='.{true}',
         expected_ast='''
         (source_file
@@ -251,7 +251,7 @@ def test_bool_attr_true(zt):
                 (self_closing_tag
                   (tag_name)
                   (attribute
-                    (dynamic_attribute
+                    (conditional_attribute
                       (attribute_name)
                       (zig_expr_free))))))))
         ''',
@@ -261,7 +261,7 @@ def test_bool_attr_true(zt):
 
 def test_bool_attr_false(zt):
     result = zt.run(
-        'pub templ run(x: bool) { <input checked={x} /> }',
+        'pub templ run(x: bool) { <input checked?={x} /> }',
         args='.{false}',
         expected_ast='''
         (source_file
@@ -279,7 +279,7 @@ def test_bool_attr_false(zt):
                 (self_closing_tag
                   (tag_name)
                   (attribute
-                    (dynamic_attribute
+                    (conditional_attribute
                       (attribute_name)
                       (zig_expr_free))))))))
         ''',
@@ -289,7 +289,7 @@ def test_bool_attr_false(zt):
 
 def test_optional_bool_attr_null(zt):
     result = zt.run(
-        'pub templ run(x: ?bool) { <input checked={x} /> }',
+        'pub templ run(x: ?bool) { <input checked?={x} /> }',
         args='.{null}',
         expected_ast='''
         (source_file
@@ -307,7 +307,7 @@ def test_optional_bool_attr_null(zt):
                 (self_closing_tag
                   (tag_name)
                   (attribute
-                    (dynamic_attribute
+                    (conditional_attribute
                       (attribute_name)
                       (zig_expr_free))))))))
         ''',

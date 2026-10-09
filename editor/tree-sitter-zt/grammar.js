@@ -112,6 +112,7 @@ module.exports = grammar({
     attribute: ($) =>
       choice(
         $.dynamic_attribute,
+        $.conditional_attribute,
         $.quoted_attribute,
         $.boolean_attribute
       ),
@@ -130,6 +131,9 @@ module.exports = grammar({
 
     dynamic_attribute: ($) =>
       seq($.attribute_name, "=", "{", $.zig_expr_free, "}"),
+
+    conditional_attribute: ($) =>
+      seq($.attribute_name, "?=", "{", $.zig_expr_free, "}"),
 
     attribute_name: (_) => /[@A-Za-z_][A-Za-z0-9\-_:.@]*/,
 

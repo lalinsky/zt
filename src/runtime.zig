@@ -145,18 +145,14 @@ fn writeFormatted(writer: *std.Io.Writer, value: anytype) std.Io.Writer.Error!vo
 }
 
 /// Writes an attribute, skipping it entirely if the value is null.
-/// A bool value is treated as an HTML boolean attribute: `true` writes the
-/// bare name and `false` skips it.
 pub fn writeAttr(writer: *std.Io.Writer, name: []const u8, value: anytype) std.Io.Writer.Error!void {
     const T = @TypeOf(value);
     const v = if (@typeInfo(T) == .optional) value orelse return else value;
 
     if (@TypeOf(v) == bool) {
-        if (v) {
-            try writer.writeAll(" ");
-            try writer.writeAll(name);
-        }
-        return;
+        // `checked="false"` would still mean checked in HTML.
+        @compileError("bool attribute value: use `attr?={expr}` for an HTML boolean attribute, " ++
+            "or pass a string for attributes that take \"true\"/\"false\"");
     }
 
     try writer.writeAll(" ");
@@ -164,6 +160,20 @@ pub fn writeAttr(writer: *std.Io.Writer, name: []const u8, value: anytype) std.I
     try writer.writeAll("=\"");
     try writeEscaped(writer, v);
     try writer.writeAll("\"");
+}
+
+/// Writes an HTML boolean attribute: the bare name when the value is true,
+/// nothing when it is false or null.
+pub fn writeBoolAttr(writer: *std.Io.Writer, name: []const u8, value: anytype) std.Io.Writer.Error!void {
+    const present: bool = switch (@TypeOf(value)) {
+        bool => value,
+        ?bool => value orelse false,
+        else => @compileError("conditional attribute expects bool or ?bool, found " ++ @typeName(@TypeOf(value))),
+    };
+    if (!present) return;
+
+    try writer.writeAll(" ");
+    try writer.writeAll(name);
 }
 
 /// Writes a value without escaping (for pre-escaped HTML).
@@ -264,32 +274,32 @@ test "writeAttr with null skips attribute" {
     try std.testing.expectEqualStrings("", output.writer.buffer[0..output.writer.end]);
 }
 
-test "writeAttr with true writes bare attribute" {
+test "writeBoolAttr with true writes bare attribute" {
     var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer output.deinit();
 
-    try writeAttr(&output.writer, "checked", true);
+    try writeBoolAttr(&output.writer, "checked", true);
     try std.testing.expectEqualStrings(" checked", output.writer.buffer[0..output.writer.end]);
 }
 
-test "writeAttr with false skips attribute" {
+test "writeBoolAttr with false skips attribute" {
     var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer output.deinit();
 
-    try writeAttr(&output.writer, "checked", false);
+    try writeBoolAttr(&output.writer, "checked", false);
     try std.testing.expectEqualStrings("", output.writer.buffer[0..output.writer.end]);
 }
 
-test "writeAttr with optional bool" {
+test "writeBoolAttr with optional bool" {
     var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer output.deinit();
 
     const yes: ?bool = true;
     const no: ?bool = false;
     const missing: ?bool = null;
-    try writeAttr(&output.writer, "a", yes);
-    try writeAttr(&output.writer, "b", no);
-    try writeAttr(&output.writer, "c", missing);
+    try writeBoolAttr(&output.writer, "a", yes);
+    try writeBoolAttr(&output.writer, "b", no);
+    try writeBoolAttr(&output.writer, "c", missing);
     try std.testing.expectEqualStrings(" a", output.writer.buffer[0..output.writer.end]);
 }
 

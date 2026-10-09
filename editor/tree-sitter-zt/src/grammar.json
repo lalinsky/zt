@@ -421,6 +421,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "conditional_attribute"
+        },
+        {
+          "type": "SYMBOL",
           "name": "quoted_attribute"
         },
         {
@@ -519,6 +523,31 @@
         {
           "type": "STRING",
           "value": "="
+        },
+        {
+          "type": "STRING",
+          "value": "{"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "zig_expr_free"
+        },
+        {
+          "type": "STRING",
+          "value": "}"
+        }
+      ]
+    },
+    "conditional_attribute": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "attribute_name"
+        },
+        {
+          "type": "STRING",
+          "value": "?="
         },
         {
           "type": "STRING",

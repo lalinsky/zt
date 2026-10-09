@@ -46,6 +46,7 @@ pub const Attribute = struct {
     pub const Value = union(enum) {
         static: []const u8, // class="foo"
         dynamic: []const u8, // class={expr}
+        conditional: []const u8, // checked?={expr}, present when expr is true
         interpolated: []const InterpolatedPart, // href="/recipe/{id}/{slug}"
         none, // boolean attribute like `disabled`
     };
