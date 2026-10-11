@@ -11,9 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
-- Templates can no longer use `writer` to reach the template's writer, because the generated code now calls it
-  `_writer`. Code like `{!writeDate(writer)}` stops compiling. Use `{zt.fmt(writeDate, .{})}` instead.
-  A template parameter can now be called `writer`. ([#34])
 - Dynamic values in URL attributes (`href`, `src`, `action`, `hx-get`, ...) are now checked for a safe scheme.
   Values that aren't relative URLs and don't use `http`, `https`, `mailto`, `tel`, `ftp` or `ftps` are replaced
   with `about:invalid#ZtFailedSanitizationURL`. Wrap trusted URLs in `zt.Url` to skip the check. ([#33])
@@ -30,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Compile errors in generated code point back to the `.zt` source: lines with user code end with a
   `// file.zt:line:col` comment, which Zig shows next to the error. ([#32])
 - The generated file keeps the line numbers of the Zig code at the top of the template. ([#32])
+- A template parameter can now be called `writer`. ([#34])
 
 ### Security
 
