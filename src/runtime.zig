@@ -144,21 +144,134 @@ fn writeFormatted(writer: *std.Io.Writer, value: anytype) std.Io.Writer.Error!vo
     try escaping.interface.print("{any}", .{value});
 }
 
-/// Writes an attribute, skipping it entirely if the value is null.
-pub fn writeAttr(writer: *std.Io.Writer, name: []const u8, value: anytype) std.Io.Writer.Error!void {
-    const T = @TypeOf(value);
-    const v = if (@typeInfo(T) == .optional) value orelse return else value;
-
-    if (@TypeOf(v) == bool) {
+fn checkAttrValueType(comptime T: type) void {
+    if (T == bool) {
         // `checked="false"` would still mean checked in HTML.
         @compileError("bool attribute value: use `attr?={expr}` for an HTML boolean attribute, " ++
             "or pass a string for attributes that take \"true\"/\"false\"");
     }
+}
+
+/// Writes an attribute, skipping it entirely if the value is null.
+pub fn writeAttr(writer: *std.Io.Writer, name: []const u8, value: anytype) std.Io.Writer.Error!void {
+    const T = @TypeOf(value);
+    const v = if (@typeInfo(T) == .optional) value orelse return else value;
+    comptime checkAttrValueType(@TypeOf(v));
 
     try writer.writeAll(" ");
     try writer.writeAll(name);
     try writer.writeAll("=\"");
     try writeEscaped(writer, v);
+    try writer.writeAll("\"");
+}
+
+/// Written in place of a URL value whose scheme is not allowed. Anything
+/// written after it ends up in the fragment, so it stays harmless.
+pub const invalid_url = "about:invalid#ZtFailedSanitizationURL";
+
+const allowed_schemes = [_][]const u8{ "http", "https", "mailto", "tel", "ftp", "ftps" };
+const max_scheme_len = 6;
+
+/// A trusted URL that skips the scheme check in URL attributes.
+/// It is still HTML-escaped, wherever it is written.
+pub const Url = struct {
+    value: []const u8,
+
+    pub fn formatHtml(self: Url, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        try writeEscapedString(writer, self.value);
+    }
+};
+
+/// Checks the scheme of a URL made of `parts` written one after another.
+/// The scheme ends at the first `:`. A `/`, `?` or `#` before it, or no `:`
+/// at all, makes the URL relative.
+fn isSchemeAllowed(parts: []const []const u8) bool {
+    var scheme: [max_scheme_len]u8 = undefined;
+    var len: usize = 0;
+    for (parts) |part| {
+        for (part) |c| {
+            switch (c) {
+                ':' => {
+                    if (len > max_scheme_len) return false;
+                    for (allowed_schemes) |allowed| {
+                        if (std.ascii.eqlIgnoreCase(scheme[0..len], allowed)) return true;
+                    }
+                    return false;
+                },
+                '/', '?', '#' => return true,
+                else => {
+                    if (len < max_scheme_len) scheme[len] = c;
+                    len += 1;
+                },
+            }
+        }
+    }
+    return true;
+}
+
+/// Returns true if `url` is relative or uses an allowed scheme
+/// (http, https, mailto, tel, ftp, ftps).
+pub fn isSafeUrl(url: []const u8) bool {
+    return isSchemeAllowed(&.{url});
+}
+
+fn isString(comptime T: type) bool {
+    return switch (@typeInfo(T)) {
+        .pointer => |ptr| switch (ptr.size) {
+            .slice => ptr.child == u8,
+            .one => @typeInfo(ptr.child) == .array and @typeInfo(ptr.child).array.child == u8,
+            else => false,
+        },
+        .array => |arr| arr.child == u8,
+        else => false,
+    };
+}
+
+/// Writes a dynamic part of a URL attribute value that comes before the scheme
+/// is known, together with the static text `before` it. The scheme check also
+/// sees the static text `after` it, which the caller writes. Anything before
+/// `before` must not contain `:`, `/`, `?` or `#`.
+///
+/// If `before`, `value` and `after` make up a disallowed scheme, writes
+/// `invalid_url` instead of `before` and `value`. Each such part is checked on
+/// its own: when an earlier part leaves the scheme open, a later one can only
+/// end it with a scheme of its own, and that gets checked.
+///
+/// Only string values are checked. Other values (ints, enums) can't carry a
+/// scheme, and values with a `formatHtml` method (like `Url`) are trusted.
+pub fn writeUrlPart(
+    writer: *std.Io.Writer,
+    comptime before: []const u8,
+    value: anytype,
+    comptime after: []const u8,
+) std.Io.Writer.Error!void {
+    const T = @TypeOf(value);
+    if (@typeInfo(T) == .optional) {
+        if (value) |v| return writeUrlPart(writer, before, v, after);
+        return writeUrlPart(writer, before, "", after);
+    }
+
+    if (comptime isString(T)) {
+        const str: []const u8 = if (@typeInfo(T) == .array) &value else value;
+        if (!isSchemeAllowed(&.{ before, str, after })) {
+            return writer.writeAll(invalid_url);
+        }
+    }
+    try writer.writeAll(before);
+    try writeEscaped(writer, value);
+}
+
+/// Writes a URL attribute, skipping it entirely if the value is null.
+/// A value with a disallowed scheme is replaced with `invalid_url`.
+pub fn writeUrlAttr(writer: *std.Io.Writer, name: []const u8, value: anytype) std.Io.Writer.Error!void {
+    const T = @TypeOf(value);
+    const v = if (@typeInfo(T) == .optional) value orelse return else value;
+    comptime checkAttrValueType(@TypeOf(v));
+
+    try writer.writeAll(" ");
+    try writer.writeAll(name);
+    try writer.writeAll("=\"");
+    try writeUrlPart(writer, "", v, "");
     try writer.writeAll("\"");
 }
 
@@ -354,4 +467,131 @@ test "escape large array" {
     try std.testing.expect(result.len > 256);
     try std.testing.expect(std.mem.startsWith(u8, result, "{ 0, 1, 2, 3,"));
     try std.testing.expect(std.mem.endsWith(u8, result, "997, 998, 999 }"));
+}
+
+test "isSafeUrl allows listed schemes in any case" {
+    for ([_][]const u8{
+        "http://example.com",
+        "https://example.com/a?b=c",
+        "mailto:user@example.com",
+        "tel:+123456",
+        "ftp://example.com",
+        "ftps://example.com",
+        "HTTPS://example.com",
+        "HtTp://example.com",
+        "MailTo:user@example.com",
+    }) |url| {
+        try std.testing.expect(isSafeUrl(url));
+    }
+}
+
+test "isSafeUrl allows relative URLs" {
+    for ([_][]const u8{ "/x", "x", "?q=1", "#frag", "//host", "/a:b", "a/b:c", "?q=a:b", "#a:b", "" }) |url| {
+        try std.testing.expect(isSafeUrl(url));
+    }
+}
+
+test "isSafeUrl rejects other schemes" {
+    for ([_][]const u8{
+        "javascript:alert(1)",
+        "JaVaScRiPt:alert(1)",
+        " javascript:alert(1)",
+        "java\tscript:alert(1)",
+        "data:text/html,<script>alert(1)</script>",
+        "vbscript:msgbox(1)",
+        "httpss://example.com",
+        ":foo",
+    }) |url| {
+        try std.testing.expect(!isSafeUrl(url));
+    }
+}
+
+fn expectUrlAttr(expected: []const u8, value: anytype) !void {
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+
+    try writeUrlAttr(&output.writer, "href", value);
+    try std.testing.expectEqualStrings(expected, output.writer.buffer[0..output.writer.end]);
+}
+
+test "writeUrlAttr writes allowed URLs escaped" {
+    try expectUrlAttr(" href=\"https://example.com/?a=1&amp;b=2\"", "https://example.com/?a=1&b=2");
+    try expectUrlAttr(" href=\"/users/&quot;x&quot;\"", "/users/\"x\"");
+    try expectUrlAttr(" href=\"\"", "");
+}
+
+test "writeUrlAttr replaces disallowed URLs" {
+    try expectUrlAttr(" href=\"" ++ invalid_url ++ "\"", "javascript:alert(1)");
+    try expectUrlAttr(" href=\"" ++ invalid_url ++ "\"", "JaVaScRiPt:alert(1)");
+    try expectUrlAttr(" href=\"" ++ invalid_url ++ "\"", " javascript:alert(1)");
+    try expectUrlAttr(" href=\"" ++ invalid_url ++ "\"", "java\tscript:alert(1)");
+    try expectUrlAttr(" href=\"" ++ invalid_url ++ "\"", "data:text/html,hi");
+    try expectUrlAttr(" href=\"" ++ invalid_url ++ "\"", "vbscript:msgbox(1)");
+}
+
+test "writeUrlAttr with optional value" {
+    const present: ?[]const u8 = "/home";
+    const missing: ?[]const u8 = null;
+    const bad: ?[]const u8 = "javascript:alert(1)";
+    try expectUrlAttr(" href=\"/home\"", present);
+    try expectUrlAttr("", missing);
+    try expectUrlAttr(" href=\"" ++ invalid_url ++ "\"", bad);
+}
+
+test "writeUrlAttr skips the check for non-string values" {
+    const Kind = enum { home, about };
+    try expectUrlAttr(" href=\"42\"", @as(i32, 42));
+    try expectUrlAttr(" href=\"about\"", Kind.about);
+}
+
+test "writeUrlAttr with Url skips the check but escapes" {
+    try expectUrlAttr(" href=\"javascript:alert(&quot;x&quot;)\"", Url{ .value = "javascript:alert(\"x\")" });
+    const ptr = &Url{ .value = "data:x" };
+    try expectUrlAttr(" href=\"data:x\"", ptr);
+    const opt: ?Url = .{ .value = "data:x" };
+    try expectUrlAttr(" href=\"data:x\"", opt);
+}
+
+test "Url is escaped outside URL attributes" {
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+
+    try writeEscaped(&output.writer, Url{ .value = "<a&b>" });
+    try std.testing.expectEqualStrings("&lt;a&amp;b&gt;", output.writer.buffer[0..output.writer.end]);
+}
+
+fn expectUrlPart(expected: []const u8, comptime before: []const u8, value: anytype, comptime after: []const u8) !void {
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+
+    try writeUrlPart(&output.writer, before, value, after);
+    try std.testing.expectEqualStrings(expected, output.writer.buffer[0..output.writer.end]);
+}
+
+test "writeUrlPart checks the scheme across before, value and after" {
+    // "{base}/x"
+    try expectUrlPart("https://example.com", "", "https://example.com", "/x");
+    try expectUrlPart("", "", "", "/x");
+    try expectUrlPart(invalid_url, "", "javascript:alert(1)", "/x");
+    // "{proto}://host"
+    try expectUrlPart("https", "", "https", "://host");
+    try expectUrlPart(invalid_url, "", "javascript", ":alert(1)");
+    // "java{rest}"
+    try expectUrlPart(invalid_url, "java", "script:alert(1)", "");
+    try expectUrlPart("htt&lt;b&gt;", "htt", "<b>", "");
+    // "{a}{b}": the second part is checked on its own
+    try expectUrlPart("java", "", "java", "");
+    try expectUrlPart(invalid_url, "", "script:alert(1)", "");
+    try expectUrlPart(invalid_url, "", ":alert(1)", "");
+    try expectUrlPart(invalid_url, "", "", ":alert(1)");
+    // optional
+    const missing: ?[]const u8 = null;
+    try expectUrlPart("", "", missing, "/x");
+}
+
+test "writeUrlPart skips the check for non-string values" {
+    const Proto = enum { ws, wss };
+    try expectUrlPart("wss", "", Proto.wss, "://host");
+    try expectUrlPart("item1", "item", @as(u32, 1), "");
+    try expectUrlPart("1", "", @as(u32, 1), ":x");
 }

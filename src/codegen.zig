@@ -19,6 +19,66 @@ const void_elements = std.StaticStringMap(void).initComptime(.{
     .{ "wbr", {} },
 });
 
+/// Attributes whose value is a URL. Dynamic values in them get a scheme check.
+/// Follows Go's html/template, plus the htmx request attributes.
+const url_attributes = std.StaticStringMapWithEql(void, std.static_string_map.eqlAsciiIgnoreCase).initComptime(.{
+    .{ "action", {} },
+    .{ "archive", {} },
+    .{ "background", {} },
+    .{ "cite", {} },
+    .{ "classid", {} },
+    .{ "codebase", {} },
+    .{ "data", {} },
+    .{ "formaction", {} },
+    .{ "href", {} },
+    .{ "icon", {} },
+    .{ "longdesc", {} },
+    .{ "manifest", {} },
+    .{ "poster", {} },
+    .{ "profile", {} },
+    .{ "src", {} },
+    .{ "usemap", {} },
+    .{ "xmlns", {} },
+    .{ "hx-get", {} },
+    .{ "hx-post", {} },
+    .{ "hx-put", {} },
+    .{ "hx-patch", {} },
+    .{ "hx-delete", {} },
+});
+
+/// Attributes that look like URLs by name but aren't a single URL.
+const non_url_attributes = std.StaticStringMapWithEql(void, std.static_string_map.eqlAsciiIgnoreCase).initComptime(.{
+    .{ "srcdoc", {} },
+    .{ "srclang", {} },
+    .{ "srcset", {} },
+});
+
+/// Whether an attribute holds a URL. Like Go's html/template, it looks through
+/// `data-` and namespace prefixes (`data-href`, `xlink:href`), and treats
+/// custom attributes with `src`, `uri` or `url` in the name as URLs.
+fn isUrlAttribute(attr_name: []const u8) bool {
+    var name = attr_name;
+    if (std.ascii.startsWithIgnoreCase(name, "data-")) {
+        name = name["data-".len..];
+    } else if (std.mem.indexOfScalar(u8, name, ':')) |i| {
+        if (std.ascii.eqlIgnoreCase(name[0..i], "xmlns")) return true;
+        name = name[i + 1 ..];
+    }
+    if (url_attributes.has(name)) return true;
+    if (non_url_attributes.has(name)) return false;
+    return containsIgnoreCase(name, "src") or
+        containsIgnoreCase(name, "uri") or
+        containsIgnoreCase(name, "url");
+}
+
+fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
+    if (needle.len > haystack.len) return false;
+    for (0..haystack.len - needle.len + 1) |i| {
+        if (std.ascii.eqlIgnoreCase(haystack[i..][0..needle.len], needle)) return true;
+    }
+    return false;
+}
+
 pub const Generator = struct {
     output: *std.Io.Writer,
     indent: usize,
@@ -354,7 +414,10 @@ pub const Generator = struct {
                     },
                     .dynamic => |expr| {
                         try self.writeIndent();
-                        try self.output.writeAll("try zt.writeAttr(writer, \"");
+                        try self.output.writeAll(if (isUrlAttribute(attr.name))
+                            "try zt.writeUrlAttr(writer, \""
+                        else
+                            "try zt.writeAttr(writer, \"");
                         try self.output.writeAll(attr.name);
                         try self.output.writeAll("\", ");
                         try self.output.writeAll(expr);
@@ -375,22 +438,10 @@ pub const Generator = struct {
                         try self.output.writeAll("try writer.writeAll(\" ");
                         try self.output.writeAll(attr.name);
                         try self.output.writeAll("=\\\"\");\n");
-                        for (parts) |part| {
-                            switch (part) {
-                                .static => |val| {
-                                    try self.writeIndent();
-                                    try self.output.writeAll("try writer.writeAll(\"");
-                                    try self.writeEscapedForZig(val);
-                                    try self.output.writeAll("\");\n");
-                                },
-                                .dynamic => |expr| {
-                                    try self.writeIndent();
-                                    try self.output.writeAll("try zt.writeEscaped(writer, ");
-                                    try self.output.writeAll(expr);
-                                    try self.output.writeAll(");");
-                                    try self.endLine(attr.loc);
-                                },
-                            }
+                        if (isUrlAttribute(attr.name)) {
+                            try self.generateUrlParts(parts, attr.loc);
+                        } else {
+                            try self.generateInterpolatedParts(parts, attr.loc);
                         }
                         try self.writeIndent();
                         try self.output.writeAll("try writer.writeAll(\"\\\"\");\n");
@@ -838,6 +889,65 @@ pub const Generator = struct {
         }
     }
 
+    fn generateInterpolatedParts(self: *Generator, parts: []const ast.Attribute.InterpolatedPart, loc: ast.Location) std.Io.Writer.Error!void {
+        for (parts) |part| {
+            switch (part) {
+                .static => |val| {
+                    try self.writeIndent();
+                    try self.output.writeAll("try writer.writeAll(\"");
+                    try self.writeEscapedForZig(val);
+                    try self.output.writeAll("\");\n");
+                },
+                .dynamic => |expr| {
+                    try self.writeIndent();
+                    try self.output.writeAll("try zt.writeEscaped(writer, ");
+                    try self.output.writeAll(expr);
+                    try self.output.writeAll(");");
+                    try self.endLine(loc);
+                },
+            }
+        }
+    }
+
+    /// Interpolated URL attribute value. Until the static text ends the scheme
+    /// (`https://...`, `/users/...`), each dynamic part goes through
+    /// zt.writeUrlPart, together with the static text around it. After that,
+    /// parts are written as usual.
+    fn generateUrlParts(self: *Generator, parts: []const ast.Attribute.InterpolatedPart, loc: ast.Location) std.Io.Writer.Error!void {
+        var scheme_open = true;
+        for (parts, 0..) |part, i| {
+            switch (part) {
+                .static => |val| {
+                    if (std.mem.indexOfAny(u8, val, ":/?#") != null) scheme_open = false;
+                    // Written by the writeUrlPart call that follows.
+                    if (scheme_open and i + 1 < parts.len and parts[i + 1] == .dynamic) continue;
+                    try self.writeIndent();
+                    try self.output.writeAll("try writer.writeAll(\"");
+                    try self.writeEscapedForZig(val);
+                    try self.output.writeAll("\");\n");
+                },
+                .dynamic => |expr| {
+                    try self.writeIndent();
+                    if (!scheme_open) {
+                        try self.output.writeAll("try zt.writeEscaped(writer, ");
+                        try self.output.writeAll(expr);
+                        try self.output.writeAll(");");
+                        try self.endLine(loc);
+                        continue;
+                    }
+                    try self.output.writeAll("try zt.writeUrlPart(writer, \"");
+                    if (i > 0 and parts[i - 1] == .static) try self.writeEscapedForZig(parts[i - 1].static);
+                    try self.output.writeAll("\", ");
+                    try self.output.writeAll(expr);
+                    try self.output.writeAll(", \"");
+                    if (i + 1 < parts.len and parts[i + 1] == .static) try self.writeEscapedForZig(parts[i + 1].static);
+                    try self.output.writeAll("\");");
+                    try self.endLine(loc);
+                },
+            }
+        }
+    }
+
     fn writeIndent(self: *Generator) std.Io.Writer.Error!void {
         for (0..self.indent) |_| {
             try self.output.writeAll("    ");
@@ -1226,4 +1336,49 @@ test "generate source location comments on user code lines" {
     // Static markup we generate ourselves is not annotated
     try std.testing.expect(std.mem.indexOf(u8, result, "try writer.writeAll(\"<ul class=\\\"list\\\">\");\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "try writer.writeAll(\"</li>\");\n") != null);
+}
+
+test "generate URL checks only where a dynamic part can set the scheme" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const parser = @import("parser.zig");
+
+    const source =
+        \\templ test(u: User) {
+        \\    <a href={u.website} title={u.name} data-url={u.feed}></a>
+        \\    <a href="/users/{u.id}"></a>
+        \\    <a href="https://{u.host}/"></a>
+        \\    <a href="{u.base}/x/{u.id}"></a>
+        \\    <img src="a{u.x}b{u.y}c" />
+        \\}
+    ;
+
+    var p = parser.Parser.init(arena.allocator(), source);
+    const template = try p.parseTemplate();
+
+    var output: std.Io.Writer.Allocating = .init(arena.allocator());
+    var gen = Generator.init(&output.writer);
+    try gen.generate(template);
+
+    const result = output.writer.buffer[0..output.writer.end];
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlAttr(writer, \"href\", u.website);\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAttr(writer, \"title\", u.name);\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlAttr(writer, \"data-url\", u.feed);\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try writer.writeAll(\"/users/\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try writer.writeAll(\"https://\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlPart(writer, \"\", u.base, \"/x/\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlPart(writer, \"a\", u.x, \"b\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlPart(writer, \"b\", u.y, \"c\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try writer.writeAll(\"c\");\n") != null);
+    try std.testing.expectEqual(3, std.mem.count(u8, result, "writeUrlPart"));
+}
+
+test "detect URL attributes" {
+    for ([_][]const u8{ "href", "HREF", "src", "action", "formaction", "xlink:href", "svg:href", "xmlns:foo", "data-href", "data-image-url", "imgsrc", "hx-get", "data-hx-post" }) |name| {
+        try std.testing.expect(isUrlAttribute(name));
+    }
+    for ([_][]const u8{ "class", "title", "srcset", "srcdoc", "srclang", "data-id", "alt" }) |name| {
+        try std.testing.expect(!isUrlAttribute(name));
+    }
 }
