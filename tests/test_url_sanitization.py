@@ -67,7 +67,7 @@ def test_dynamic_non_url_attr_unchecked(zt):
         args='.{"javascript:alert(1)"}',
     )
     assert result == '<div title="javascript:alert(1)"></div>'
-    assert 'zt.writeAttr(writer, "title", v)' in generated(zt)
+    assert 'zt.writeAttr(_writer, "title", v)' in generated(zt)
 
 
 def test_interpolated_relative_prefix_unchecked(zt):
@@ -151,3 +151,34 @@ def test_xlink_href_checked(zt):
         args='.{"javascript:alert(1)"}',
     )
     assert result == f'<use xlink:href="{INVALID}"></use>'
+
+
+FORMATTER = '''
+fn link(scheme: []const u8, path: []const u8, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+    try writer.print("{s}:{s}", .{ scheme, path });
+}
+'''
+
+
+def test_dynamic_href_fmt_allowed(zt):
+    result = zt.run(
+        FORMATTER + 'pub templ run(s: []const u8) { <a href={zt.fmt(link, .{ s, "//example.com/?a&b" })}>x</a> }',
+        args='.{"https"}',
+    )
+    assert result == '<a href="https://example.com/?a&amp;b">x</a>'
+
+
+def test_dynamic_href_fmt_javascript(zt):
+    result = zt.run(
+        FORMATTER + 'pub templ run(s: []const u8) { <a href={zt.fmt(link, .{ s, "alert(1)" })}>x</a> }',
+        args='.{"javascript"}',
+    )
+    assert result == f'<a href="{INVALID}">x</a>'
+
+
+def test_interpolated_href_fmt_scheme_after(zt):
+    result = zt.run(
+        FORMATTER + 'pub templ run(s: []const u8) { <a href="{zt.fmt(link, .{ s, "" })}alert(1)">x</a> }',
+        args='.{"javascript"}',
+    )
+    assert result == f'<a href="{INVALID}alert(1)">x</a>'

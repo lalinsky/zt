@@ -146,7 +146,7 @@ pub const Generator = struct {
         if (template.params.len > 0 or has_children_param or num_children_calls > 0) {
             try self.output.writeAll(", ");
         }
-        try self.output.writeAll("writer: *std.Io.Writer) std.Io.Writer.Error!void {");
+        try self.output.writeAll("_writer: *std.Io.Writer) std.Io.Writer.Error!void {");
         try self.endParamsLine(template.params);
 
         self.indent += 1;
@@ -187,7 +187,7 @@ pub const Generator = struct {
 
         // render
         try self.writeIndent();
-        try self.output.writeAll("pub fn render(args: Args, writer: *std.Io.Writer) std.Io.Writer.Error!void {\n");
+        try self.output.writeAll("pub fn render(args: Args, _writer: *std.Io.Writer) std.Io.Writer.Error!void {\n");
         self.indent += 1;
         // Bind inner structs
         for (0..num_children_calls) |i| {
@@ -205,7 +205,7 @@ pub const Generator = struct {
             try self.writeChildrenParamName(i);
             try self.output.writeAll(", ");
         }
-        try self.output.writeAll("writer});\n");
+        try self.output.writeAll("_writer});\n");
         self.indent -= 1;
         try self.writeIndent();
         try self.output.writeAll("}\n\n");
@@ -223,10 +223,10 @@ pub const Generator = struct {
         try self.output.writeAll(".renderFn = struct {\n");
         self.indent += 1;
         try self.writeIndent();
-        try self.output.writeAll("fn f(ptr: *const anyopaque, writer: *std.Io.Writer) std.Io.Writer.Error!void {\n");
+        try self.output.writeAll("fn f(ptr: *const anyopaque, _writer: *std.Io.Writer) std.Io.Writer.Error!void {\n");
         self.indent += 1;
         try self.writeIndent();
-        try self.output.writeAll("return render(@as(*const Args, @ptrCast(@alignCast(ptr))).*, writer);\n");
+        try self.output.writeAll("return render(@as(*const Args, @ptrCast(@alignCast(ptr))).*, _writer);\n");
         self.indent -= 1;
         try self.writeIndent();
         try self.output.writeAll("}\n");
@@ -302,7 +302,7 @@ pub const Generator = struct {
             try self.output.writeAll(": zt.Component");
         }
         if (params.len > 0 or num_children_calls > 0) try self.output.writeAll(", ");
-        try self.output.writeAll("writer: *std.Io.Writer) std.Io.Writer.Error!void {");
+        try self.output.writeAll("_writer: *std.Io.Writer) std.Io.Writer.Error!void {");
         try self.endParamsLine(params);
         self.indent += 1;
         if (params.len > 0) try self.writeParamDiscards(params);
@@ -366,7 +366,7 @@ pub const Generator = struct {
 
         // Opening tag start
         try self.writeIndent();
-        try self.output.writeAll("try writer.writeAll(\"<");
+        try self.output.writeAll("try _writer.writeAll(\"<");
         try self.output.writeAll(elem.tag);
 
         if (!has_dynamic) {
@@ -402,22 +402,22 @@ pub const Generator = struct {
                 switch (attr.value) {
                     .static => |val| {
                         try self.writeIndent();
-                        try self.output.writeAll("try writer.writeAll(\"");
+                        try self.output.writeAll("try _writer.writeAll(\"");
                         try self.writeStaticAttr(attr.name, val);
                         try self.output.writeAll("\");\n");
                     },
                     .none => {
                         try self.writeIndent();
-                        try self.output.writeAll("try writer.writeAll(\" ");
+                        try self.output.writeAll("try _writer.writeAll(\" ");
                         try self.output.writeAll(attr.name);
                         try self.output.writeAll("\");\n");
                     },
                     .dynamic => |expr| {
                         try self.writeIndent();
                         try self.output.writeAll(if (isUrlAttribute(attr.name))
-                            "try zt.writeUrlAttr(writer, \""
+                            "try zt.writeUrlAttr(_writer, \""
                         else
-                            "try zt.writeAttr(writer, \"");
+                            "try zt.writeAttr(_writer, \"");
                         try self.output.writeAll(attr.name);
                         try self.output.writeAll("\", ");
                         try self.output.writeAll(expr);
@@ -426,7 +426,7 @@ pub const Generator = struct {
                     },
                     .conditional => |expr| {
                         try self.writeIndent();
-                        try self.output.writeAll("try zt.writeBoolAttr(writer, \"");
+                        try self.output.writeAll("try zt.writeBoolAttr(_writer, \"");
                         try self.output.writeAll(attr.name);
                         try self.output.writeAll("\", ");
                         try self.output.writeAll(expr);
@@ -435,7 +435,7 @@ pub const Generator = struct {
                     },
                     .interpolated => |parts| {
                         try self.writeIndent();
-                        try self.output.writeAll("try writer.writeAll(\" ");
+                        try self.output.writeAll("try _writer.writeAll(\" ");
                         try self.output.writeAll(attr.name);
                         try self.output.writeAll("=\\\"\");\n");
                         if (isUrlAttribute(attr.name)) {
@@ -444,7 +444,7 @@ pub const Generator = struct {
                             try self.generateInterpolatedParts(parts, attr.loc);
                         }
                         try self.writeIndent();
-                        try self.output.writeAll("try writer.writeAll(\"\\\"\");\n");
+                        try self.output.writeAll("try _writer.writeAll(\"\\\"\");\n");
                     },
                 }
             }
@@ -454,13 +454,13 @@ pub const Generator = struct {
             const is_void = void_elements.has(elem.tag);
             if (is_void or elem.self_closing) {
                 if (is_void) {
-                    try self.output.writeAll("try writer.writeAll(\">\");\n");
+                    try self.output.writeAll("try _writer.writeAll(\">\");\n");
                 } else {
-                    try self.output.writeAll("try writer.writeAll(\"/>\");\n");
+                    try self.output.writeAll("try _writer.writeAll(\"/>\");\n");
                 }
                 return;
             }
-            try self.output.writeAll("try writer.writeAll(\">\");\n");
+            try self.output.writeAll("try _writer.writeAll(\">\");\n");
         }
 
         // Children
@@ -470,7 +470,7 @@ pub const Generator = struct {
 
         // Closing tag
         try self.writeIndent();
-        try self.output.writeAll("try writer.writeAll(\"</");
+        try self.output.writeAll("try _writer.writeAll(\"</");
         try self.output.writeAll(elem.tag);
         try self.output.writeAll(">\");\n");
     }
@@ -479,14 +479,14 @@ pub const Generator = struct {
         if (text.content.len == 0) return;
 
         try self.writeIndent();
-        try self.output.writeAll("try writer.writeAll(\"");
+        try self.output.writeAll("try _writer.writeAll(\"");
         try self.writeEscapedForZig(text.content);
         try self.output.writeAll("\");\n");
     }
 
     fn generateDoctype(self: *Generator, doctype: ast.Doctype) std.Io.Writer.Error!void {
         try self.writeIndent();
-        try self.output.writeAll("try writer.writeAll(\"<!DOCTYPE ");
+        try self.output.writeAll("try _writer.writeAll(\"<!DOCTYPE ");
         try self.output.writeAll(doctype.value);
         try self.output.writeAll(">\");\n");
     }
@@ -571,9 +571,9 @@ pub const Generator = struct {
     fn generateZigCode(self: *Generator, code: []const u8, raw: bool, loc: ast.Location) std.Io.Writer.Error!void {
         try self.writeIndent();
         if (raw) {
-            try self.output.writeAll("try zt.writeRaw(writer, ");
+            try self.output.writeAll("try zt.writeRaw(_writer, ");
         } else {
-            try self.output.writeAll("try zt.writeEscaped(writer, ");
+            try self.output.writeAll("try zt.writeEscaped(_writer, ");
         }
         try self.output.writeAll(code);
         try self.output.writeAll(");");
@@ -594,7 +594,7 @@ pub const Generator = struct {
             try self.writeChildrenParamName(self.children_call_index);
             self.children_call_index += 1;
         }
-        try self.output.writeAll("}, writer);");
+        try self.output.writeAll("}, _writer);");
         try self.endLine(call.loc);
     }
 
@@ -894,13 +894,13 @@ pub const Generator = struct {
             switch (part) {
                 .static => |val| {
                     try self.writeIndent();
-                    try self.output.writeAll("try writer.writeAll(\"");
+                    try self.output.writeAll("try _writer.writeAll(\"");
                     try self.writeEscapedForZig(val);
                     try self.output.writeAll("\");\n");
                 },
                 .dynamic => |expr| {
                     try self.writeIndent();
-                    try self.output.writeAll("try zt.writeEscaped(writer, ");
+                    try self.output.writeAll("try zt.writeEscaped(_writer, ");
                     try self.output.writeAll(expr);
                     try self.output.writeAll(");");
                     try self.endLine(loc);
@@ -922,20 +922,20 @@ pub const Generator = struct {
                     // Written by the writeUrlPart call that follows.
                     if (scheme_open and i + 1 < parts.len and parts[i + 1] == .dynamic) continue;
                     try self.writeIndent();
-                    try self.output.writeAll("try writer.writeAll(\"");
+                    try self.output.writeAll("try _writer.writeAll(\"");
                     try self.writeEscapedForZig(val);
                     try self.output.writeAll("\");\n");
                 },
                 .dynamic => |expr| {
                     try self.writeIndent();
                     if (!scheme_open) {
-                        try self.output.writeAll("try zt.writeEscaped(writer, ");
+                        try self.output.writeAll("try zt.writeEscaped(_writer, ");
                         try self.output.writeAll(expr);
                         try self.output.writeAll(");");
                         try self.endLine(loc);
                         continue;
                     }
-                    try self.output.writeAll("try zt.writeUrlPart(writer, \"");
+                    try self.output.writeAll("try zt.writeUrlPart(_writer, \"");
                     if (i > 0 and parts[i - 1] == .static) try self.writeEscapedForZig(parts[i - 1].static);
                     try self.output.writeAll("\", ");
                     try self.output.writeAll(expr);
@@ -1030,7 +1030,7 @@ test "generate with expression" {
     try gen.generate(template);
 
     const result = output.writer.buffer[0..output.writer.end];
-    try std.testing.expect(std.mem.indexOf(u8, result, "zt.writeEscaped(writer, name)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "zt.writeEscaped(_writer, name)") != null);
 }
 
 test "generate inline if" {
@@ -1106,8 +1106,8 @@ test "generate component call" {
     try gen.generate(template);
 
     const result = output.writer.buffer[0..output.writer.end];
-    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.renderComponent(Header, .{}, writer);") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.renderComponent(UserCard, .{user}, writer);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.renderComponent(Header, .{}, _writer);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.renderComponent(UserCard, .{user}, _writer);") != null);
 }
 
 test "generate dotted component call" {
@@ -1131,8 +1131,8 @@ test "generate dotted component call" {
     try gen.generate(template);
 
     const result = output.writer.buffer[0..output.writer.end];
-    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.renderComponent(components.Header, .{}, writer);") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.renderComponent(ui.UserCard, .{user}, writer);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.renderComponent(components.Header, .{}, _writer);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.renderComponent(ui.UserCard, .{user}, _writer);") != null);
 }
 
 test "generate raw output" {
@@ -1156,8 +1156,8 @@ test "generate raw output" {
     try gen.generate(template);
 
     const result = output.writer.buffer[0..output.writer.end];
-    try std.testing.expect(std.mem.indexOf(u8, result, "zt.writeEscaped(writer, html)") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "zt.writeRaw(writer, html)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "zt.writeEscaped(_writer, html)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "zt.writeRaw(_writer, html)") != null);
 }
 
 test "generate inline for" {
@@ -1331,11 +1331,11 @@ test "generate source location comments on user code lines" {
     const result = output.writer.buffer[0..output.writer.end];
     try std.testing.expect(std.mem.indexOf(u8, result, "std.Io.Writer.Error!void { // test.zt:1:11\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "for (items) |item| { // test.zt:3:9\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAttr(writer, \"id\", item.id); // test.zt:4:17\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeEscaped(writer, item.name); // test.zt:4:30\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAttr(_writer, \"id\", item.id); // test.zt:4:17\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeEscaped(_writer, item.name); // test.zt:4:30\n") != null);
     // Static markup we generate ourselves is not annotated
-    try std.testing.expect(std.mem.indexOf(u8, result, "try writer.writeAll(\"<ul class=\\\"list\\\">\");\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try writer.writeAll(\"</li>\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"<ul class=\\\"list\\\">\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"</li>\");\n") != null);
 }
 
 test "generate URL checks only where a dynamic part can set the scheme" {
@@ -1362,15 +1362,15 @@ test "generate URL checks only where a dynamic part can set the scheme" {
     try gen.generate(template);
 
     const result = output.writer.buffer[0..output.writer.end];
-    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlAttr(writer, \"href\", u.website);\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAttr(writer, \"title\", u.name);\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlAttr(writer, \"data-url\", u.feed);\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try writer.writeAll(\"/users/\");\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try writer.writeAll(\"https://\");\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlPart(writer, \"\", u.base, \"/x/\");\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlPart(writer, \"a\", u.x, \"b\");\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlPart(writer, \"b\", u.y, \"c\");\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try writer.writeAll(\"c\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlAttr(_writer, \"href\", u.website);\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAttr(_writer, \"title\", u.name);\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlAttr(_writer, \"data-url\", u.feed);\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"/users/\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"https://\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlPart(_writer, \"\", u.base, \"/x/\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlPart(_writer, \"a\", u.x, \"b\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlPart(_writer, \"b\", u.y, \"c\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"c\");\n") != null);
     try std.testing.expectEqual(3, std.mem.count(u8, result, "writeUrlPart"));
 }
 

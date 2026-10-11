@@ -17,6 +17,8 @@ pub const isSafeUrl = @import("runtime.zig").isSafeUrl;
 pub const Url = @import("runtime.zig").Url;
 pub const invalid_url = @import("runtime.zig").invalid_url;
 pub const renderComponent = @import("runtime.zig").renderComponent;
+pub const fmt = @import("runtime.zig").fmt;
+pub const Fmt = @import("runtime.zig").Fmt;
 
 test {
     std.testing.refAllDecls(@This());

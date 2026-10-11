@@ -58,12 +58,18 @@ pub inline fn renderComponent(target: anytype, args: anytype, writer: *std.Io.Wr
 
 /// Writes a value to the writer, escaping HTML special characters.
 /// If the value has a `formatHtml` method, it's called directly (assumed safe).
+/// If it has a `format` method, what that writes is escaped.
 pub fn writeEscaped(writer: *std.Io.Writer, value: anytype) std.Io.Writer.Error!void {
     const T = @TypeOf(value);
 
     // Check for formatHtml method - assumed to be pre-escaped/safe HTML
     if (comptime std.meta.hasMethod(T, "formatHtml")) {
         return value.formatHtml(writer);
+    }
+
+    if (comptime std.meta.hasMethod(T, "format")) {
+        var escaping: EscapingWriter = .{ .underlying = writer };
+        return value.format(&escaping.interface);
     }
 
     switch (@typeInfo(T)) {
@@ -152,6 +158,43 @@ fn checkAttrValueType(comptime T: type) void {
     }
 }
 
+/// Returns a value whose `format` method calls `func` with `args` followed by
+/// the writer, so a function that writes to a writer can be used in a template:
+///
+///     fn dateTime(ts: i64, w: *std.Io.Writer) std.Io.Writer.Error!void { ... }
+///
+///     <time>{zt.fmt(dateTime, .{post.created_at})}</time>
+///
+/// Like any other value, what it writes is escaped, unless written with `{!...}`.
+pub fn fmt(comptime func: anytype, args: anytype) Fmt(func, @TypeOf(args)) {
+    return .{ .args = args };
+}
+
+pub fn Fmt(comptime func: anytype, comptime Args: type) type {
+    if (@typeInfo(Args) != .@"struct" or !@typeInfo(Args).@"struct".is_tuple) {
+        @compileError("zt.fmt: expected the arguments as a tuple, like .{x}, found " ++ @typeName(Args));
+    }
+    return struct {
+        args: Args,
+
+        pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            const result = @call(.auto, func, self.args ++ .{writer});
+            const R = @TypeOf(result);
+            if (R == void) return;
+            if (comptime isWriterErrorUnion(R)) return result;
+            @compileError("zt.fmt: the function must return void or std.Io.Writer.Error!void, found " ++ @typeName(R));
+        }
+    };
+}
+
+fn isWriterErrorUnion(comptime T: type) bool {
+    return switch (@typeInfo(T)) {
+        .error_union => |info| info.payload == void and
+            (info.error_set || std.Io.Writer.Error) == std.Io.Writer.Error,
+        else => false,
+    };
+}
+
 /// Writes an attribute, skipping it entirely if the value is null.
 pub fn writeAttr(writer: *std.Io.Writer, name: []const u8, value: anytype) std.Io.Writer.Error!void {
     const T = @TypeOf(value);
@@ -182,23 +225,25 @@ pub const Url = struct {
     }
 };
 
+const SchemeCheck = enum { allowed, rejected, open };
+
 /// Checks the scheme of a URL made of `parts` written one after another.
-/// The scheme ends at the first `:`. A `/`, `?` or `#` before it, or no `:`
-/// at all, makes the URL relative.
-fn isSchemeAllowed(parts: []const []const u8) bool {
+/// The scheme ends at the first `:`. A `/`, `?` or `#` before it makes the
+/// URL relative. Without any of them, the check stays open.
+fn checkScheme(parts: []const []const u8) SchemeCheck {
     var scheme: [max_scheme_len]u8 = undefined;
     var len: usize = 0;
     for (parts) |part| {
         for (part) |c| {
             switch (c) {
                 ':' => {
-                    if (len > max_scheme_len) return false;
+                    if (len > max_scheme_len) return .rejected;
                     for (allowed_schemes) |allowed| {
-                        if (std.ascii.eqlIgnoreCase(scheme[0..len], allowed)) return true;
+                        if (std.ascii.eqlIgnoreCase(scheme[0..len], allowed)) return .allowed;
                     }
-                    return false;
+                    return .rejected;
                 },
-                '/', '?', '#' => return true,
+                '/', '?', '#' => return .allowed,
                 else => {
                     if (len < max_scheme_len) scheme[len] = c;
                     len += 1;
@@ -206,8 +251,87 @@ fn isSchemeAllowed(parts: []const []const u8) bool {
             }
         }
     }
-    return true;
+    return .open;
 }
+
+/// Like `checkScheme`, but a URL without a `:` is relative, so allowed.
+fn isSchemeAllowed(parts: []const []const u8) bool {
+    return checkScheme(parts) != .rejected;
+}
+
+/// Escapes what a `format` method writes as a URL part. Nothing is written
+/// until the scheme check over `before` and the output so far is decided, so
+/// a disallowed scheme can still be replaced with `invalid_url`.
+const UrlPartWriter = struct {
+    underlying: *std.Io.Writer,
+    before: []const u8,
+    check: SchemeCheck = .open,
+    /// Output held back while the check is open.
+    pending: [max_pending]u8 = undefined,
+    pending_len: usize = 0,
+    interface: std.Io.Writer = .{
+        .vtable = &.{ .drain = drain },
+        .buffer = &.{},
+    },
+
+    /// How much output can be held back. If it fills up before the check is
+    /// decided, the URL is rejected.
+    const max_pending = 1024;
+
+    fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+        const self: *UrlPartWriter = @fieldParentPtr("interface", w);
+        var total: usize = 0;
+        for (data[0 .. data.len - 1]) |bytes| {
+            try self.feed(bytes);
+            total += bytes.len;
+        }
+        const pattern = data[data.len - 1];
+        for (0..splat) |_| {
+            try self.feed(pattern);
+            total += pattern.len;
+        }
+        return total;
+    }
+
+    fn feed(self: *UrlPartWriter, bytes: []const u8) std.Io.Writer.Error!void {
+        switch (self.check) {
+            .allowed => return writeEscapedString(self.underlying, bytes),
+            .rejected => return,
+            .open => {},
+        }
+        for (bytes, 0..) |c, i| {
+            if (self.pending_len == max_pending) return self.decide(.rejected);
+            self.pending[self.pending_len] = c;
+            self.pending_len += 1;
+            switch (c) {
+                ':', '/', '?', '#' => {
+                    try self.decide(checkScheme(&.{ self.before, self.pending[0..self.pending_len] }));
+                    return self.feed(bytes[i + 1 ..]);
+                },
+                else => {},
+            }
+        }
+    }
+
+    /// Ends the output. If the check is still open, `after` decides it.
+    fn finish(self: *UrlPartWriter, after: []const u8) std.Io.Writer.Error!void {
+        if (self.check != .open) return;
+        const check = checkScheme(&.{ self.before, self.pending[0..self.pending_len], after });
+        try self.decide(if (check == .rejected) .rejected else .allowed);
+    }
+
+    fn decide(self: *UrlPartWriter, check: SchemeCheck) std.Io.Writer.Error!void {
+        self.check = check;
+        switch (check) {
+            .allowed => {
+                try self.underlying.writeAll(self.before);
+                try writeEscapedString(self.underlying, self.pending[0..self.pending_len]);
+            },
+            .rejected => try self.underlying.writeAll(invalid_url),
+            .open => unreachable,
+        }
+    }
+};
 
 /// Returns true if `url` is relative or uses an allowed scheme
 /// (http, https, mailto, tel, ftp, ftps).
@@ -237,8 +361,11 @@ fn isString(comptime T: type) bool {
 /// its own: when an earlier part leaves the scheme open, a later one can only
 /// end it with a scheme of its own, and that gets checked.
 ///
-/// Only string values are checked. Other values (ints, enums) can't carry a
-/// scheme, and values with a `formatHtml` method (like `Url`) are trusted.
+/// String values and what `format` methods write are checked. Other values
+/// (ints, enums) can't carry a scheme, and values with a `formatHtml` method
+/// (like `Url`) are trusted. What a `format` method writes is held back until
+/// the check is decided, and if that takes more than 1024 bytes, the URL is
+/// rejected.
 pub fn writeUrlPart(
     writer: *std.Io.Writer,
     comptime before: []const u8,
@@ -256,6 +383,11 @@ pub fn writeUrlPart(
         if (!isSchemeAllowed(&.{ before, str, after })) {
             return writer.writeAll(invalid_url);
         }
+    }
+    if (comptime !std.meta.hasMethod(T, "formatHtml") and std.meta.hasMethod(T, "format")) {
+        var url: UrlPartWriter = .{ .underlying = writer, .before = before };
+        try value.format(&url.interface);
+        return url.finish(after);
     }
     try writer.writeAll(before);
     try writeEscaped(writer, value);
@@ -290,14 +422,26 @@ pub fn writeBoolAttr(writer: *std.Io.Writer, name: []const u8, value: anytype) s
 }
 
 /// Writes a value without escaping (for pre-escaped HTML).
+/// If the value has a `formatHtml` or `format` method, it's called directly.
 pub fn writeRaw(writer: *std.Io.Writer, value: anytype) std.Io.Writer.Error!void {
     const T = @TypeOf(value);
 
+    if (comptime std.meta.hasMethod(T, "formatHtml")) {
+        return value.formatHtml(writer);
+    }
+
+    if (comptime std.meta.hasMethod(T, "format")) {
+        return value.format(writer);
+    }
+
+    if (comptime isString(T)) {
+        return writer.writeAll(if (@typeInfo(T) == .array) &value else value);
+    }
+
     switch (@typeInfo(T)) {
-        .pointer => |ptr| {
-            if (ptr.size == .slice and ptr.child == u8) {
-                try writer.writeAll(value);
-                return;
+        .optional => {
+            if (value) |v| {
+                try writeRaw(writer, v);
             }
         },
         .void => {
@@ -594,4 +738,164 @@ test "writeUrlPart skips the check for non-string values" {
     try expectUrlPart("wss", "", Proto.wss, "://host");
     try expectUrlPart("item1", "item", @as(u32, 1), "");
     try expectUrlPart("1", "", @as(u32, 1), ":x");
+}
+
+const Formatted = struct {
+    text: []const u8,
+
+    pub fn format(self: Formatted, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        try writer.writeAll(self.text);
+    }
+};
+
+test "format is escaped" {
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+
+    try writeEscaped(&output.writer, Formatted{ .text = "<b>&</b>" });
+    try writeEscaped(&output.writer, &Formatted{ .text = "\"" });
+    const opt: ?Formatted = .{ .text = "<" };
+    try writeEscaped(&output.writer, opt);
+    try std.testing.expectEqualStrings("&lt;b&gt;&amp;&lt;/b&gt;&quot;&lt;", output.written());
+}
+
+test "format is written raw" {
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+
+    try writeRaw(&output.writer, Formatted{ .text = "<b>bold</b>" });
+    try std.testing.expectEqualStrings("<b>bold</b>", output.written());
+}
+
+test "formatHtml takes precedence over format" {
+    const Both = struct {
+        pub fn format(_: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            try writer.writeAll("<text>");
+        }
+
+        pub fn formatHtml(_: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            try writer.writeAll("<html>");
+        }
+    };
+
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+
+    try writeEscaped(&output.writer, Both{});
+    try writeRaw(&output.writer, Both{});
+    try std.testing.expectEqualStrings("<html><html>", output.written());
+}
+
+test "writeRaw with optionals and string literals" {
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+
+    const opt: ?Formatted = .{ .text = "<a>" };
+    const missing: ?Formatted = null;
+    try writeRaw(&output.writer, opt);
+    try writeRaw(&output.writer, missing);
+    try writeRaw(&output.writer, "<b>");
+    try writeRaw(&output.writer, [_]u8{ '<', 'c', '>' });
+    try std.testing.expectEqualStrings("<a><b><c>", output.written());
+}
+
+test "enum with format is written through it" {
+    const Color = enum {
+        red,
+
+        pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            try writer.print("<{t}>", .{self});
+        }
+    };
+
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+
+    try writeEscaped(&output.writer, Color.red);
+    try std.testing.expectEqualStrings("&lt;red&gt;", output.written());
+}
+
+fn testDate(year: u16, month: u8, day: u8, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+    try writer.print("{d}-{d:0>2}-{d:0>2}", .{ year, month, day });
+}
+
+fn testTag(name: []const u8, writer: *std.Io.Writer) void {
+    writer.print("<{s}>", .{name}) catch {};
+}
+
+test "fmt calls the function with the writer" {
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+
+    var day: u8 = 5;
+    _ = &day;
+    try writeEscaped(&output.writer, fmt(testDate, .{ 2026, 10, day }));
+    try writeEscaped(&output.writer, fmt(testTag, .{"b"}));
+    try writeRaw(&output.writer, fmt(testTag, .{"b"}));
+    try std.testing.expectEqualStrings("2026-10-05&lt;b&gt;<b>", output.written());
+}
+
+test "fmt in an attribute" {
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+
+    try writeAttr(&output.writer, "title", fmt(testTag, .{"\"x\""}));
+    try std.testing.expectEqualStrings(" title=\"&lt;&quot;x&quot;&gt;\"", output.written());
+}
+
+/// Writes its text in pieces of `chunk` bytes, to test output split across writes.
+const Chunked = struct {
+    text: []const u8,
+    chunk: usize,
+
+    pub fn format(self: Chunked, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        var rest = self.text;
+        while (rest.len > 0) {
+            const n = @min(self.chunk, rest.len);
+            try writer.writeAll(rest[0..n]);
+            rest = rest[n..];
+        }
+    }
+};
+
+test "writeUrlPart checks the scheme of format output" {
+    for ([_]usize{ 1, 3, 100 }) |chunk| {
+        try expectUrlPart("https://example.com/?a=1&amp;b=2", "", Chunked{ .text = "https://example.com/?a=1&b=2", .chunk = chunk }, "");
+        try expectUrlPart("/a:b", "", Chunked{ .text = "/a:b", .chunk = chunk }, "");
+        try expectUrlPart(invalid_url, "", Chunked{ .text = "javascript:alert(1)", .chunk = chunk }, "");
+        try expectUrlPart(invalid_url, "java", Chunked{ .text = "script:alert(1)", .chunk = chunk }, "");
+        try expectUrlPart("htt&lt;b&gt;", "htt", Chunked{ .text = "<b>", .chunk = chunk }, "");
+        // decided by `after`
+        try expectUrlPart("https", "", Chunked{ .text = "https", .chunk = chunk }, "://host");
+        try expectUrlPart(invalid_url, "", Chunked{ .text = "javascript", .chunk = chunk }, ":alert(1)");
+        try expectUrlPart("page", "", Chunked{ .text = "page", .chunk = chunk }, "");
+        try expectUrlPart("", "", Chunked{ .text = "", .chunk = chunk }, "/x");
+    }
+    try expectUrlPart(invalid_url, "", fmt(testTag, .{"x"}), ":y");
+    try expectUrlPart("&lt;x&gt;", "", fmt(testTag, .{"x"}), "/y");
+    try expectUrlAttr(" href=\"" ++ invalid_url ++ "\"", Formatted{ .text = "data:text/html,hi" });
+    try expectUrlAttr(" href=\"/x\"", Formatted{ .text = "/x" });
+    const opt: ?Formatted = .{ .text = "javascript:x" };
+    try expectUrlAttr(" href=\"" ++ invalid_url ++ "\"", opt);
+    try expectUrlAttr(" href=\"" ++ invalid_url ++ "\"", &Formatted{ .text = "javascript:x" });
+}
+
+const Padded = struct {
+    slashes: usize,
+
+    pub fn format(self: Padded, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        try writer.print("{s:>12}", .{"javascript"});
+        try writer.splatByteAll('/', self.slashes);
+    }
+};
+
+test "writeUrlPart checks splat and padded format output" {
+    try expectUrlPart("  javascript///", "", Padded{ .slashes = 3 }, ":x");
+    try expectUrlPart(invalid_url, "", Padded{ .slashes = 0 }, ":x");
+}
+
+test "writeUrlPart rejects format output too long to check" {
+    const long: [UrlPartWriter.max_pending - 1]u8 = @splat('a');
+    try expectUrlPart(long ++ "/", "", Formatted{ .text = long ++ "/" }, "");
+    try expectUrlPart(invalid_url, "", Formatted{ .text = long ++ "a/" }, "");
 }

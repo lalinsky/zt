@@ -1463,12 +1463,10 @@ pub templ run(recipe: Recipe) {
 def test_void_function_no_output(zt):
     """Test that void-returning functions don't print 'void' - issue #11"""
     result = zt.run('''
-fn writeDate(writer: *@import("std").Io.Writer) void {
-    writer.writeAll("2022-05-06") catch return;
-}
+fn touch() void {}
 
 pub templ run() {
-    <p>Created {!writeDate(writer)}</p>
+    <p>Created {!touch()}</p>
 }
 ''', expected_ast='''
         (source_file
@@ -1489,7 +1487,49 @@ pub templ run() {
                 (close_tag
                   (tag_name))))))
         ''')
-    assert result == '<p>Created 2022-05-06</p>'
+    assert result == '<p>Created </p>'
+
+
+def test_param_named_writer(zt):
+    """Test that a template parameter can be called writer"""
+    result = zt.run(
+        'pub templ run(writer: []const u8) { <p>{writer}</p> }',
+        args='.{"Ann"}',
+    )
+    assert result == '<p>Ann</p>'
+
+
+def test_fmt_function_escaped(zt):
+    """Test that zt.fmt passes the writer to a function and escapes its output - issue #11"""
+    result = zt.run('''
+fn dateTime(ts: i64, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+    try writer.print("<{d}>", .{ts});
+}
+
+pub templ run(ts: i64) {
+    <p title={zt.fmt(dateTime, .{ts})}>{zt.fmt(dateTime, .{ts})}</p>
+    <p>{!zt.fmt(dateTime, .{ts})}</p>
+}
+''', args='.{@as(i64, 42)}')
+    assert result == '<p title="&lt;42&gt;">&lt;42&gt;</p><p><42></p>'
+
+
+def test_format_method_escaped(zt):
+    """Test that a value with a format method is written through it, escaped"""
+    result = zt.run('''
+const Money = struct {
+    cents: u32,
+
+    pub fn format(self: Money, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        try writer.print("{d}.{d:0>2} <EUR>", .{ self.cents / 100, self.cents % 100 });
+    }
+};
+
+pub templ run(price: Money) {
+    <span>{price}</span>
+}
+''', args='.{.{ .cents = 1205 }}')
+    assert result == '<span>12.05 &lt;EUR&gt;</span>'
 
 
 def test_multiline_html_attributes(zt):
