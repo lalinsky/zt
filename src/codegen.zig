@@ -85,7 +85,7 @@ pub const Generator = struct {
     children_call_index: usize = 0,
     source_file: []const u8 = "",
     template_loc: ast.Location = .{},
-    /// Whether a `_writer.writeAll("...` literal is open. Static output is
+    /// Whether a `zt.writeAll(_writer, "...` literal is open. Static output is
     /// appended to it, and the next line of other code closes it, so adjacent
     /// static pieces end up in a single write.
     static_open: bool = false,
@@ -888,12 +888,12 @@ pub const Generator = struct {
         }
     }
 
-    /// Writes static output, appending it to the open `_writer.writeAll` literal.
+    /// Writes static output, appending it to the open `zt.writeAll` literal.
     fn writeStatic(self: *Generator, str: []const u8) std.Io.Writer.Error!void {
         if (str.len == 0) return;
         if (!self.static_open) {
             try self.writeIndent();
-            try self.output.writeAll("try _writer.writeAll(\"");
+            try self.output.writeAll("try zt.writeAll(_writer, \"");
             self.static_open = true;
         }
         try self.writeEscapedForZig(str);
@@ -1278,12 +1278,12 @@ test "generate merges adjacent static output into one write" {
     try gen.generate(template);
 
     const result = output.writer.buffer[0..output.writer.end];
-    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"<!DOCTYPE html><html><body class=\\\"main\\\"><h1>Items</h1><ul>\");\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"<li\");\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"><b>\");\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"</b></li>\");\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"</ul></body></html>\");\n") != null);
-    try std.testing.expectEqual(5, std.mem.count(u8, result, "_writer.writeAll("));
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAll(_writer, \"<!DOCTYPE html><html><body class=\\\"main\\\"><h1>Items</h1><ul>\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAll(_writer, \"<li\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAll(_writer, \"><b>\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAll(_writer, \"</b></li>\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAll(_writer, \"</ul></body></html>\");\n") != null);
+    try std.testing.expectEqual(5, std.mem.count(u8, result, "zt.writeAll("));
 }
 
 test "generate source location comments on user code lines" {
@@ -1316,8 +1316,8 @@ test "generate source location comments on user code lines" {
     try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAttr(_writer, \"id\", item.id); // test.zt:4:17\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeEscaped(_writer, item.name); // test.zt:4:30\n") != null);
     // Static markup we generate ourselves is not annotated
-    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"<ul class=\\\"list\\\">\");\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"</li>\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAll(_writer, \"<ul class=\\\"list\\\">\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAll(_writer, \"</li>\");\n") != null);
 }
 
 test "generate URL checks only where a dynamic part can set the scheme" {
@@ -1347,12 +1347,12 @@ test "generate URL checks only where a dynamic part can set the scheme" {
     try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlAttr(_writer, \"href\", u.website);\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAttr(_writer, \"title\", u.name);\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlAttr(_writer, \"data-url\", u.feed);\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"></a><a href=\\\"/users/\");\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"\\\"></a><a href=\\\"https://\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAll(_writer, \"></a><a href=\\\"/users/\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAll(_writer, \"\\\"></a><a href=\\\"https://\");\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlPart(_writer, \"\", u.base, \"/x/\");\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlPart(_writer, \"a\", u.x, \"b\");\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlPart(_writer, \"b\", u.y, \"c\");\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"c\\\">\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAll(_writer, \"c\\\">\");\n") != null);
     try std.testing.expectEqual(3, std.mem.count(u8, result, "writeUrlPart"));
 }
 

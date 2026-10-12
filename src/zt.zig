@@ -7,6 +7,7 @@ pub const Generator = @import("codegen.zig").Generator;
 
 // Runtime types and functions for generated code
 pub const Component = @import("runtime.zig").Component;
+pub const writeAll = @import("runtime.zig").writeAll;
 pub const writeEscaped = @import("runtime.zig").writeEscaped;
 pub const writeRaw = @import("runtime.zig").writeRaw;
 pub const writeAttr = @import("runtime.zig").writeAttr;

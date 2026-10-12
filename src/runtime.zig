@@ -33,6 +33,21 @@ pub const EscapingWriter = struct {
     }
 };
 
+/// Same as `std.Io.Writer.writeAll`, but checks whether the bytes fit in the
+/// buffer before entering the loop. `writeAll` only does that inside `write`,
+/// in a loop over the remaining bytes, so the copy length is never constant
+/// and every write turns into a `memcpy` call. Here, a call with a string
+/// literal copies a fixed number of bytes, which compiles to a few moves.
+pub fn writeAll(writer: *std.Io.Writer, bytes: []const u8) std.Io.Writer.Error!void {
+    if (writer.end + bytes.len <= writer.buffer.len) {
+        @branchHint(.likely);
+        @memcpy(writer.buffer[writer.end..][0..bytes.len], bytes);
+        writer.end += bytes.len;
+        return;
+    }
+    return writer.writeAll(bytes);
+}
+
 /// A type-erased renderable component.
 pub const Component = struct {
     ptr: *const anyopaque,
@@ -205,9 +220,9 @@ pub fn writeAttr(writer: *std.Io.Writer, comptime name: []const u8, value: anyty
     const v = if (@typeInfo(T) == .optional) value orelse return else value;
     comptime checkAttrValueType(@TypeOf(v));
 
-    try writer.writeAll(" " ++ name ++ "=\"");
+    try writeAll(writer, " " ++ name ++ "=\"");
     try writeEscaped(writer, v);
-    try writer.writeAll("\"");
+    try writeAll(writer, "\"");
 }
 
 /// Written in place of a URL value whose scheme is not allowed. Anything
@@ -402,9 +417,9 @@ pub fn writeUrlAttr(writer: *std.Io.Writer, comptime name: []const u8, value: an
     const v = if (@typeInfo(T) == .optional) value orelse return else value;
     comptime checkAttrValueType(@TypeOf(v));
 
-    try writer.writeAll(" " ++ name ++ "=\"");
+    try writeAll(writer, " " ++ name ++ "=\"");
     try writeUrlPart(writer, "", v, "");
-    try writer.writeAll("\"");
+    try writeAll(writer, "\"");
 }
 
 /// Writes an HTML boolean attribute: the bare name when the value is true,
@@ -417,7 +432,7 @@ pub fn writeBoolAttr(writer: *std.Io.Writer, comptime name: []const u8, value: a
     };
     if (!present) return;
 
-    try writer.writeAll(" " ++ name);
+    try writeAll(writer, " " ++ name);
 }
 
 /// Writes a value without escaping (for pre-escaped HTML).
@@ -905,4 +920,19 @@ test "writeUrlPart rejects format output too long to check" {
     const long: [UrlPartWriter.max_pending - 1]u8 = @splat('a');
     try expectUrlPart(long ++ "/", "", Formatted{ .text = long ++ "/" }, "");
     try expectUrlPart(invalid_url, "", Formatted{ .text = long ++ "a/" }, "");
+}
+
+test "writeAll writes through the buffer and grows it when full" {
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+
+    // The buffer starts empty, so the first write goes through drain and
+    // the next ones fit into what it allocated.
+    try writeAll(&output.writer, "<td>");
+    try writeAll(&output.writer, "1");
+    try writeAll(&output.writer, "</td>");
+    try writeAll(&output.writer, "");
+    const long: [1000]u8 = @splat('x');
+    try writeAll(&output.writer, &long);
+    try std.testing.expectEqualStrings("<td>1</td>" ++ &long, output.written());
 }
