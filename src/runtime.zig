@@ -220,6 +220,9 @@ fn indexOfSpecial(str: []const u8, start: usize) ?usize {
         64 => u64,
         else => unreachable,
     };
+    // Zig 0.16 bit-casts element 0 of a bool vector to the most significant
+    // bit on big-endian targets, 0.17 always to the least significant one.
+    const reversed = @as(Mask, @bitCast(std.simd.iota(u8, len) == @as(Chunk, @splat(0)))) != 1;
 
     var i = start;
     while (i + len <= str.len) : (i += len) {
@@ -230,7 +233,7 @@ fn indexOfSpecial(str: []const u8, start: usize) ?usize {
             (chunk == @as(Chunk, @splat('"'))) |
             (chunk == @as(Chunk, @splat('\'')));
         const mask: Mask = @bitCast(special);
-        if (mask != 0) return i + @ctz(mask);
+        if (mask != 0) return i + @ctz(if (reversed) @bitReverse(mask) else mask);
     }
     while (i < str.len) : (i += 1) {
         if (is_special[str[i]]) return i;

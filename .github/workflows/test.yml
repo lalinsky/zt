@@ -63,3 +63,13 @@ jobs:
       timeout-minutes: 10
       env:
         TEST_VERBOSE: true
+
+    # The SIMD code in the runtime depends on how vectors map to integers,
+    # which differs on big-endian targets.
+    - name: Run unit tests on big-endian (s390x)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y qemu-user-static
+        zig build test -Dtarget=s390x-linux -fqemu --summary all
+      timeout-minutes: 10
