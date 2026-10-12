@@ -98,7 +98,11 @@ pub fn writeEscaped(writer: *std.Io.Writer, value: anytype) std.Io.Writer.Error!
             }
             try writeFormatted(writer, value);
         },
-        .int, .float => {
+        .int, .comptime_int => {
+            // Digits and a sign never need escaping.
+            try writer.printInt(value, 10, .lower, .{});
+        },
+        .float => {
             try writeFormatted(writer, value);
         },
         .optional => {
@@ -484,7 +488,15 @@ test "escape numbers" {
     defer output.deinit();
 
     try writeEscaped(&output.writer, @as(i32, 42));
-    try std.testing.expectEqualStrings("42", output.writer.buffer[0..output.writer.end]);
+    try writeEscaped(&output.writer, " ");
+    try writeEscaped(&output.writer, @as(i64, -1234567));
+    try writeEscaped(&output.writer, " ");
+    try writeEscaped(&output.writer, @as(u8, 255));
+    try writeEscaped(&output.writer, " ");
+    try writeEscaped(&output.writer, 100);
+    try writeEscaped(&output.writer, " ");
+    try writeEscaped(&output.writer, @as(f64, 1.5));
+    try std.testing.expectEqualStrings("42 -1234567 255 100 1.5", output.writer.buffer[0..output.writer.end]);
 }
 
 test "escape optional" {
