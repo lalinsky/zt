@@ -186,21 +186,43 @@ fn countDigits(comptime U: type, value: U) usize {
     return count;
 }
 
-fn writeEscapedString(writer: *std.Io.Writer, str: []const u8) std.Io.Writer.Error!void {
+/// Strings shorter than the smallest vector never reach the vector loop, and
+/// most values in a template are short, so those are escaped inline. A call
+/// costs more than the scan: it sets up the vector constants and makes the
+/// writer's state go through memory.
+inline fn writeEscapedString(writer: *std.Io.Writer, str: []const u8) std.Io.Writer.Error!void {
+    if (str.len < 16) {
+        var start: usize = 0;
+        for (str, 0..) |c, i| {
+            if (!is_special[c]) continue;
+            try writeAll(writer, str[start..i]);
+            try writeEntity(writer, c);
+            start = i + 1;
+        }
+        return writeAll(writer, str[start..]);
+    }
+    return writeEscapedLong(writer, str);
+}
+
+noinline fn writeEscapedLong(writer: *std.Io.Writer, str: []const u8) std.Io.Writer.Error!void {
     var start: usize = 0;
     while (indexOfSpecial(str, start)) |i| {
         try writeAll(writer, str[start..i]);
-        switch (str[i]) {
-            '<' => try writeAll(writer, "&lt;"),
-            '>' => try writeAll(writer, "&gt;"),
-            '&' => try writeAll(writer, "&amp;"),
-            '"' => try writeAll(writer, "&quot;"),
-            '\'' => try writeAll(writer, "&#x27;"),
-            else => unreachable,
-        }
+        try writeEntity(writer, str[i]);
         start = i + 1;
     }
     try writeAll(writer, str[start..]);
+}
+
+fn writeEntity(writer: *std.Io.Writer, c: u8) std.Io.Writer.Error!void {
+    switch (c) {
+        '<' => try writeAll(writer, "&lt;"),
+        '>' => try writeAll(writer, "&gt;"),
+        '&' => try writeAll(writer, "&amp;"),
+        '"' => try writeAll(writer, "&quot;"),
+        '\'' => try writeAll(writer, "&#x27;"),
+        else => unreachable,
+    }
 }
 
 const is_special = blk: {
