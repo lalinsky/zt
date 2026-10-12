@@ -38,7 +38,12 @@ pub const EscapingWriter = struct {
 /// in a loop over the remaining bytes, so the copy length is never constant
 /// and every write turns into a `memcpy` call. Here, a call with a string
 /// literal copies a fixed number of bytes, which compiles to a few moves.
-pub fn writeAll(writer: *std.Io.Writer, bytes: []const u8) std.Io.Writer.Error!void {
+///
+/// `writer` is `noalias`, like in the other writing helpers, so the compiler
+/// can keep `end` in a register instead of reloading it after every byte
+/// stored into the buffer, which could otherwise overwrite the writer itself.
+/// Nothing may change the writer through another pointer during the call.
+pub fn writeAll(noalias writer: *std.Io.Writer, bytes: []const u8) std.Io.Writer.Error!void {
     if (writer.end + bytes.len <= writer.buffer.len) {
         @branchHint(.likely);
         @memcpy(writer.buffer[writer.end..][0..bytes.len], bytes);
@@ -147,7 +152,7 @@ pub fn writeEscaped(writer: *std.Io.Writer, value: anytype) std.Io.Writer.Error!
 /// value of the type, the digits are written straight into it. `printInt`
 /// formats into a temporary buffer and copies that out with `writeAll`,
 /// which turns into a `memcpy` call for every number.
-fn writeInt(writer: *std.Io.Writer, value: anytype) std.Io.Writer.Error!void {
+fn writeInt(noalias writer: *std.Io.Writer, value: anytype) std.Io.Writer.Error!void {
     const T = @TypeOf(value);
     const info = @typeInfo(T).int;
     const U = if (info.bits <= 32) u32 else if (info.bits <= 64) u64 else if (info.bits <= 128) u128 else {
@@ -190,7 +195,7 @@ fn countDigits(comptime U: type, value: U) usize {
 /// most values in a template are short, so those are escaped inline. A call
 /// costs more than the scan: it sets up the vector constants and makes the
 /// writer's state go through memory.
-inline fn writeEscapedString(writer: *std.Io.Writer, str: []const u8) std.Io.Writer.Error!void {
+inline fn writeEscapedString(noalias writer: *std.Io.Writer, str: []const u8) std.Io.Writer.Error!void {
     if (str.len < 16) {
         var start: usize = 0;
         for (str, 0..) |c, i| {
@@ -204,7 +209,7 @@ inline fn writeEscapedString(writer: *std.Io.Writer, str: []const u8) std.Io.Wri
     return writeEscapedLong(writer, str);
 }
 
-noinline fn writeEscapedLong(writer: *std.Io.Writer, str: []const u8) std.Io.Writer.Error!void {
+noinline fn writeEscapedLong(noalias writer: *std.Io.Writer, str: []const u8) std.Io.Writer.Error!void {
     var start: usize = 0;
     while (indexOfSpecial(str, start)) |i| {
         try writeAll(writer, str[start..i]);
@@ -214,7 +219,7 @@ noinline fn writeEscapedLong(writer: *std.Io.Writer, str: []const u8) std.Io.Wri
     try writeAll(writer, str[start..]);
 }
 
-fn writeEntity(writer: *std.Io.Writer, c: u8) std.Io.Writer.Error!void {
+fn writeEntity(noalias writer: *std.Io.Writer, c: u8) std.Io.Writer.Error!void {
     switch (c) {
         '<' => try writeAll(writer, "&lt;"),
         '>' => try writeAll(writer, "&gt;"),
