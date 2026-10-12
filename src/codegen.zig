@@ -85,6 +85,10 @@ pub const Generator = struct {
     children_call_index: usize = 0,
     source_file: []const u8 = "",
     template_loc: ast.Location = .{},
+    /// Whether a `_writer.writeAll("...` literal is open. Static output is
+    /// appended to it, and the next line of other code closes it, so adjacent
+    /// static pieces end up in a single write.
+    static_open: bool = false,
 
     pub fn init(output: *std.Io.Writer) Generator {
         return .{
@@ -355,140 +359,73 @@ pub const Generator = struct {
     }
 
     fn generateElement(self: *Generator, elem: ast.Element) std.Io.Writer.Error!void {
-        // Check if we have any dynamic attributes
-        var has_dynamic = false;
+        try self.writeStatic("<");
+        try self.writeStatic(elem.tag);
+
         for (elem.attributes) |attr| {
-            if (attr.value == .dynamic or attr.value == .interpolated or attr.value == .conditional) {
-                has_dynamic = true;
-                break;
+            switch (attr.value) {
+                .static => |val| try self.writeStaticAttr(attr.name, val),
+                .none => {
+                    try self.writeStatic(" ");
+                    try self.writeStatic(attr.name);
+                },
+                .dynamic => |expr| {
+                    try self.writeIndent();
+                    try self.output.writeAll(if (isUrlAttribute(attr.name))
+                        "try zt.writeUrlAttr(_writer, \""
+                    else
+                        "try zt.writeAttr(_writer, \"");
+                    try self.output.writeAll(attr.name);
+                    try self.output.writeAll("\", ");
+                    try self.output.writeAll(expr);
+                    try self.output.writeAll(");");
+                    try self.endLine(attr.loc);
+                },
+                .conditional => |expr| {
+                    try self.writeIndent();
+                    try self.output.writeAll("try zt.writeBoolAttr(_writer, \"");
+                    try self.output.writeAll(attr.name);
+                    try self.output.writeAll("\", ");
+                    try self.output.writeAll(expr);
+                    try self.output.writeAll(");");
+                    try self.endLine(attr.loc);
+                },
+                .interpolated => |parts| {
+                    try self.writeStatic(" ");
+                    try self.writeStatic(attr.name);
+                    try self.writeStatic("=\"");
+                    if (isUrlAttribute(attr.name)) {
+                        try self.generateUrlParts(parts, attr.loc);
+                    } else {
+                        try self.generateInterpolatedParts(parts, attr.loc);
+                    }
+                    try self.writeStatic("\"");
+                },
             }
         }
 
-        // Opening tag start
-        try self.writeIndent();
-        try self.output.writeAll("try _writer.writeAll(\"<");
-        try self.output.writeAll(elem.tag);
+        const is_void = void_elements.has(elem.tag);
+        if (is_void) return self.writeStatic(">");
+        if (elem.self_closing) return self.writeStatic("/>");
+        try self.writeStatic(">");
 
-        if (!has_dynamic) {
-            // Simple case: all static attributes, write in one string
-            for (elem.attributes) |attr| {
-                switch (attr.value) {
-                    .static => |val| {
-                        try self.writeStaticAttr(attr.name, val);
-                    },
-                    .none => {
-                        try self.output.writeAll(" ");
-                        try self.output.writeAll(attr.name);
-                    },
-                    .dynamic, .interpolated, .conditional => {},
-                }
-            }
-
-            const is_void = void_elements.has(elem.tag);
-            if (is_void or elem.self_closing) {
-                if (is_void) {
-                    try self.output.writeAll(">\");\n");
-                } else {
-                    try self.output.writeAll("/>\");\n");
-                }
-                return;
-            }
-            try self.output.writeAll(">\");\n");
-        } else {
-            // Has dynamic attributes - need to interleave
-            try self.output.writeAll("\");\n");
-
-            for (elem.attributes) |attr| {
-                switch (attr.value) {
-                    .static => |val| {
-                        try self.writeIndent();
-                        try self.output.writeAll("try _writer.writeAll(\"");
-                        try self.writeStaticAttr(attr.name, val);
-                        try self.output.writeAll("\");\n");
-                    },
-                    .none => {
-                        try self.writeIndent();
-                        try self.output.writeAll("try _writer.writeAll(\" ");
-                        try self.output.writeAll(attr.name);
-                        try self.output.writeAll("\");\n");
-                    },
-                    .dynamic => |expr| {
-                        try self.writeIndent();
-                        try self.output.writeAll(if (isUrlAttribute(attr.name))
-                            "try zt.writeUrlAttr(_writer, \""
-                        else
-                            "try zt.writeAttr(_writer, \"");
-                        try self.output.writeAll(attr.name);
-                        try self.output.writeAll("\", ");
-                        try self.output.writeAll(expr);
-                        try self.output.writeAll(");");
-                        try self.endLine(attr.loc);
-                    },
-                    .conditional => |expr| {
-                        try self.writeIndent();
-                        try self.output.writeAll("try zt.writeBoolAttr(_writer, \"");
-                        try self.output.writeAll(attr.name);
-                        try self.output.writeAll("\", ");
-                        try self.output.writeAll(expr);
-                        try self.output.writeAll(");");
-                        try self.endLine(attr.loc);
-                    },
-                    .interpolated => |parts| {
-                        try self.writeIndent();
-                        try self.output.writeAll("try _writer.writeAll(\" ");
-                        try self.output.writeAll(attr.name);
-                        try self.output.writeAll("=\\\"\");\n");
-                        if (isUrlAttribute(attr.name)) {
-                            try self.generateUrlParts(parts, attr.loc);
-                        } else {
-                            try self.generateInterpolatedParts(parts, attr.loc);
-                        }
-                        try self.writeIndent();
-                        try self.output.writeAll("try _writer.writeAll(\"\\\"\");\n");
-                    },
-                }
-            }
-
-            // Close opening tag
-            try self.writeIndent();
-            const is_void = void_elements.has(elem.tag);
-            if (is_void or elem.self_closing) {
-                if (is_void) {
-                    try self.output.writeAll("try _writer.writeAll(\">\");\n");
-                } else {
-                    try self.output.writeAll("try _writer.writeAll(\"/>\");\n");
-                }
-                return;
-            }
-            try self.output.writeAll("try _writer.writeAll(\">\");\n");
-        }
-
-        // Children
         for (elem.children) |child| {
             try self.generateNode(child);
         }
 
-        // Closing tag
-        try self.writeIndent();
-        try self.output.writeAll("try _writer.writeAll(\"</");
-        try self.output.writeAll(elem.tag);
-        try self.output.writeAll(">\");\n");
+        try self.writeStatic("</");
+        try self.writeStatic(elem.tag);
+        try self.writeStatic(">");
     }
 
     fn generateText(self: *Generator, text: ast.Text) std.Io.Writer.Error!void {
-        if (text.content.len == 0) return;
-
-        try self.writeIndent();
-        try self.output.writeAll("try _writer.writeAll(\"");
-        try self.writeEscapedForZig(text.content);
-        try self.output.writeAll("\");\n");
+        try self.writeStatic(text.content);
     }
 
     fn generateDoctype(self: *Generator, doctype: ast.Doctype) std.Io.Writer.Error!void {
-        try self.writeIndent();
-        try self.output.writeAll("try _writer.writeAll(\"<!DOCTYPE ");
-        try self.output.writeAll(doctype.value);
-        try self.output.writeAll(">\");\n");
+        try self.writeStatic("<!DOCTYPE ");
+        try self.writeStatic(doctype.value);
+        try self.writeStatic(">");
     }
 
     fn generateExpr(self: *Generator, expr: ast.Expr) std.Io.Writer.Error!void {
@@ -892,12 +829,7 @@ pub const Generator = struct {
     fn generateInterpolatedParts(self: *Generator, parts: []const ast.Attribute.InterpolatedPart, loc: ast.Location) std.Io.Writer.Error!void {
         for (parts) |part| {
             switch (part) {
-                .static => |val| {
-                    try self.writeIndent();
-                    try self.output.writeAll("try _writer.writeAll(\"");
-                    try self.writeEscapedForZig(val);
-                    try self.output.writeAll("\");\n");
-                },
+                .static => |val| try self.writeStatic(val),
                 .dynamic => |expr| {
                     try self.writeIndent();
                     try self.output.writeAll("try zt.writeEscaped(_writer, ");
@@ -921,10 +853,7 @@ pub const Generator = struct {
                     if (std.mem.indexOfAny(u8, val, ":/?#") != null) scheme_open = false;
                     // Written by the writeUrlPart call that follows.
                     if (scheme_open and i + 1 < parts.len and parts[i + 1] == .dynamic) continue;
-                    try self.writeIndent();
-                    try self.output.writeAll("try _writer.writeAll(\"");
-                    try self.writeEscapedForZig(val);
-                    try self.output.writeAll("\");\n");
+                    try self.writeStatic(val);
                 },
                 .dynamic => |expr| {
                     try self.writeIndent();
@@ -948,23 +877,38 @@ pub const Generator = struct {
         }
     }
 
+    /// Starts a new line of generated code, closing the open static literal first.
     fn writeIndent(self: *Generator) std.Io.Writer.Error!void {
+        if (self.static_open) {
+            try self.output.writeAll("\");\n");
+            self.static_open = false;
+        }
         for (0..self.indent) |_| {
             try self.output.writeAll("    ");
         }
     }
 
-    /// Writes ` name="value"` into a Zig string literal. A value containing `"`
-    /// came from a single-quoted attribute and can't contain `'`, so it keeps
-    /// single quotes.
+    /// Writes static output, appending it to the open `_writer.writeAll` literal.
+    fn writeStatic(self: *Generator, str: []const u8) std.Io.Writer.Error!void {
+        if (str.len == 0) return;
+        if (!self.static_open) {
+            try self.writeIndent();
+            try self.output.writeAll("try _writer.writeAll(\"");
+            self.static_open = true;
+        }
+        try self.writeEscapedForZig(str);
+    }
+
+    /// Writes ` name="value"` as static output. A value containing `"` came from
+    /// a single-quoted attribute and can't contain `'`, so it keeps single quotes.
     fn writeStaticAttr(self: *Generator, name: []const u8, value: []const u8) std.Io.Writer.Error!void {
-        const quote = if (std.mem.indexOfScalar(u8, value, '"') != null) "'" else "\\\"";
-        try self.output.writeAll(" ");
-        try self.output.writeAll(name);
-        try self.output.writeAll("=");
-        try self.output.writeAll(quote);
-        try self.writeEscapedForZig(value);
-        try self.output.writeAll(quote);
+        const quote = if (std.mem.indexOfScalar(u8, value, '"') != null) "'" else "\"";
+        try self.writeStatic(" ");
+        try self.writeStatic(name);
+        try self.writeStatic("=");
+        try self.writeStatic(quote);
+        try self.writeStatic(value);
+        try self.writeStatic(quote);
     }
 
     fn writeEscapedForZig(self: *Generator, str: []const u8) std.Io.Writer.Error!void {
@@ -1304,6 +1248,44 @@ test "generate void elements without closing slash" {
     try std.testing.expect(std.mem.indexOf(u8, result, "</head>") != null);
 }
 
+test "generate merges adjacent static output into one write" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const parser = @import("parser.zig");
+
+    const source =
+        \\templ test(items: []const []const u8) {
+        \\    <!DOCTYPE html>
+        \\    <html>
+        \\        <body class="main">
+        \\            <h1>Items</h1>
+        \\            <ul>
+        \\                for (items) |item| {
+        \\                    <li class={item}><b>{item}</b></li>
+        \\                }
+        \\            </ul>
+        \\        </body>
+        \\    </html>
+        \\}
+    ;
+
+    var p = parser.Parser.init(arena.allocator(), source);
+    const template = try p.parseTemplate();
+
+    var output: std.Io.Writer.Allocating = .init(arena.allocator());
+    var gen = Generator.init(&output.writer);
+    try gen.generate(template);
+
+    const result = output.writer.buffer[0..output.writer.end];
+    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"<!DOCTYPE html><html><body class=\\\"main\\\"><h1>Items</h1><ul>\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"<li\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"><b>\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"</b></li>\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"</ul></body></html>\");\n") != null);
+    try std.testing.expectEqual(5, std.mem.count(u8, result, "_writer.writeAll("));
+}
+
 test "generate source location comments on user code lines" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1365,12 +1347,12 @@ test "generate URL checks only where a dynamic part can set the scheme" {
     try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlAttr(_writer, \"href\", u.website);\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAttr(_writer, \"title\", u.name);\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlAttr(_writer, \"data-url\", u.feed);\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"/users/\");\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"https://\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"></a><a href=\\\"/users/\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"\\\"></a><a href=\\\"https://\");\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlPart(_writer, \"\", u.base, \"/x/\");\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlPart(_writer, \"a\", u.x, \"b\");\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeUrlPart(_writer, \"b\", u.y, \"c\");\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"c\");\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try _writer.writeAll(\"c\\\">\");\n") != null);
     try std.testing.expectEqual(3, std.mem.count(u8, result, "writeUrlPart"));
 }
 

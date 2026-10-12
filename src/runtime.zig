@@ -200,14 +200,12 @@ fn isWriterErrorUnion(comptime T: type) bool {
 }
 
 /// Writes an attribute, skipping it entirely if the value is null.
-pub fn writeAttr(writer: *std.Io.Writer, name: []const u8, value: anytype) std.Io.Writer.Error!void {
+pub fn writeAttr(writer: *std.Io.Writer, comptime name: []const u8, value: anytype) std.Io.Writer.Error!void {
     const T = @TypeOf(value);
     const v = if (@typeInfo(T) == .optional) value orelse return else value;
     comptime checkAttrValueType(@TypeOf(v));
 
-    try writer.writeAll(" ");
-    try writer.writeAll(name);
-    try writer.writeAll("=\"");
+    try writer.writeAll(" " ++ name ++ "=\"");
     try writeEscaped(writer, v);
     try writer.writeAll("\"");
 }
@@ -399,21 +397,19 @@ pub fn writeUrlPart(
 
 /// Writes a URL attribute, skipping it entirely if the value is null.
 /// A value with a disallowed scheme is replaced with `invalid_url`.
-pub fn writeUrlAttr(writer: *std.Io.Writer, name: []const u8, value: anytype) std.Io.Writer.Error!void {
+pub fn writeUrlAttr(writer: *std.Io.Writer, comptime name: []const u8, value: anytype) std.Io.Writer.Error!void {
     const T = @TypeOf(value);
     const v = if (@typeInfo(T) == .optional) value orelse return else value;
     comptime checkAttrValueType(@TypeOf(v));
 
-    try writer.writeAll(" ");
-    try writer.writeAll(name);
-    try writer.writeAll("=\"");
+    try writer.writeAll(" " ++ name ++ "=\"");
     try writeUrlPart(writer, "", v, "");
     try writer.writeAll("\"");
 }
 
 /// Writes an HTML boolean attribute: the bare name when the value is true,
 /// nothing when it is false or null.
-pub fn writeBoolAttr(writer: *std.Io.Writer, name: []const u8, value: anytype) std.Io.Writer.Error!void {
+pub fn writeBoolAttr(writer: *std.Io.Writer, comptime name: []const u8, value: anytype) std.Io.Writer.Error!void {
     const present: bool = switch (@TypeOf(value)) {
         bool => value,
         ?bool => value orelse false,
@@ -421,8 +417,7 @@ pub fn writeBoolAttr(writer: *std.Io.Writer, name: []const u8, value: anytype) s
     };
     if (!present) return;
 
-    try writer.writeAll(" ");
-    try writer.writeAll(name);
+    try writer.writeAll(" " ++ name);
 }
 
 /// Writes a value without escaping (for pre-escaped HTML).
