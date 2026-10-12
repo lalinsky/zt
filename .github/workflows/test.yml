@@ -7,14 +7,23 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
         zig-version: ['0.16.0', '0.17.0']
 
+    defaults:
+      run:
+        shell: bash
+
     steps:
+    - name: Keep LF line endings
+      if: runner.os == 'Windows'
+      run: git config --global core.autocrlf false
+
     - name: Checkout code
       uses: actions/checkout@v4
 
@@ -23,17 +32,22 @@ jobs:
       with:
         version: ${{ matrix.zig-version }}
 
+    # The grammar and the integration tests check the generated code, which
+    # doesn't depend on the platform, so they only run on Linux.
     - name: Setup Python
+      if: runner.os == 'Linux'
       uses: actions/setup-python@v5
       with:
         python-version: '3.12'
 
     - name: Setup Node
+      if: runner.os == 'Linux'
       uses: actions/setup-node@v4
       with:
         node-version: '22'
 
     - name: Build grammar
+      if: runner.os == 'Linux'
       working-directory: editor/tree-sitter-zt
       run: |
         npm ci
@@ -41,10 +55,11 @@ jobs:
         npx tree-sitter build
 
     - name: Install pytest
+      if: runner.os == 'Linux'
       run: pip install pytest
 
     - name: Run check script
-      run: ./check.sh --ci --full
-      timeout-minutes: 5
+      run: ./check.sh --ci ${{ runner.os == 'Linux' && '--full' || '' }}
+      timeout-minutes: 10
       env:
         TEST_VERBOSE: true
