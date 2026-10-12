@@ -113,8 +113,11 @@ pub fn writeEscaped(writer: *std.Io.Writer, value: anytype) std.Io.Writer.Error!
             }
             try writeFormatted(writer, value);
         },
-        .int, .comptime_int => {
+        .int => {
             // Digits and a sign never need escaping.
+            try writeInt(writer, value);
+        },
+        .comptime_int => {
             try writer.printInt(value, 10, .lower, .{});
         },
         .float => {
@@ -138,6 +141,49 @@ pub fn writeEscaped(writer: *std.Io.Writer, value: anytype) std.Io.Writer.Error!
             try writeFormatted(writer, value);
         },
     }
+}
+
+/// Writes an integer in decimal. When the buffer has room for the longest
+/// value of the type, the digits are written straight into it. `printInt`
+/// formats into a temporary buffer and copies that out with `writeAll`,
+/// which turns into a `memcpy` call for every number.
+fn writeInt(writer: *std.Io.Writer, value: anytype) std.Io.Writer.Error!void {
+    const T = @TypeOf(value);
+    const info = @typeInfo(T).int;
+    const U = if (info.bits <= 32) u32 else if (info.bits <= 64) u64 else if (info.bits <= 128) u128 else {
+        return writer.printInt(value, 10, .lower, .{});
+    };
+    const negative = info.signedness == .signed and value < 0;
+    const max_len = comptime countDigits(U, @abs(std.math.maxInt(T))) + @intFromBool(info.signedness == .signed);
+    if (writer.buffer.len - writer.end < max_len) {
+        return writer.printInt(value, 10, .lower, .{});
+    }
+
+    var a: U = @abs(value);
+    const len = countDigits(U, a) + @intFromBool(negative);
+    const dest = writer.buffer[writer.end..][0..len];
+    if (negative) dest[0] = '-';
+    var i = len;
+    while (a >= 100) : (a /= 100) {
+        i -= 2;
+        dest[i..][0..2].* = std.fmt.digits2(@intCast(a % 100));
+    }
+    if (a < 10) {
+        dest[i - 1] = '0' + @as(u8, @intCast(a));
+    } else {
+        dest[i - 2 ..][0..2].* = std.fmt.digits2(@intCast(a));
+    }
+    writer.end += len;
+}
+
+fn countDigits(comptime U: type, value: U) usize {
+    var count: usize = 1;
+    var limit: U = 10;
+    while (value >= limit) {
+        count += 1;
+        limit = std.math.mul(U, limit, 10) catch break;
+    }
+    return count;
 }
 
 fn writeEscapedString(writer: *std.Io.Writer, str: []const u8) std.Io.Writer.Error!void {
@@ -507,6 +553,45 @@ test "escape numbers" {
     try writeEscaped(&output.writer, " ");
     try writeEscaped(&output.writer, @as(f64, 1.5));
     try std.testing.expectEqualStrings("42 -1234567 255 100 1.5", output.writer.buffer[0..output.writer.end]);
+}
+
+test "writeInt writes every digit count, sign and limit" {
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+    // Make sure the fast path runs.
+    try output.ensureUnusedCapacity(64);
+
+    const cases = .{
+        .{ @as(u8, 0), "0" },
+        .{ @as(u8, 9), "9" },
+        .{ @as(u8, 10), "10" },
+        .{ @as(u8, 99), "99" },
+        .{ @as(u8, 100), "100" },
+        .{ @as(u8, 255), "255" },
+        .{ @as(i8, -128), "-128" },
+        .{ @as(i8, -1), "-1" },
+        .{ @as(u1, 1), "1" },
+        .{ @as(i32, 1_000_000), "1000000" },
+        .{ @as(u32, std.math.maxInt(u32)), "4294967295" },
+        .{ @as(u64, std.math.maxInt(u64)), "18446744073709551615" },
+        .{ @as(i64, std.math.minInt(i64)), "-9223372036854775808" },
+        .{ @as(u128, std.math.maxInt(u128)), "340282366920938463463374607431768211455" },
+        .{ @as(i128, std.math.minInt(i128)), "-170141183460469231731687303715884105728" },
+        .{ @as(u256, 12345), "12345" },
+    };
+    inline for (cases) |case| {
+        output.clearRetainingCapacity();
+        try writeInt(&output.writer, case[0]);
+        try std.testing.expectEqualStrings(case[1], output.written());
+    }
+}
+
+test "writeInt falls back to printInt without room for the longest value" {
+    var buf: [4]u8 = undefined;
+    var writer: std.Io.Writer = .fixed(&buf);
+    try writeInt(&writer, @as(u64, 42));
+    try writeInt(&writer, @as(i32, -7));
+    try std.testing.expectEqualStrings("42-7", writer.buffered());
 }
 
 test "escape optional" {
