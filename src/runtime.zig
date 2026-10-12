@@ -188,26 +188,54 @@ fn countDigits(comptime U: type, value: U) usize {
 
 fn writeEscapedString(writer: *std.Io.Writer, str: []const u8) std.Io.Writer.Error!void {
     var start: usize = 0;
-    for (str, 0..) |c, i| {
-        const escape: ?[]const u8 = switch (c) {
-            '<' => "&lt;",
-            '>' => "&gt;",
-            '&' => "&amp;",
-            '"' => "&quot;",
-            '\'' => "&#x27;",
-            else => null,
-        };
-        if (escape) |esc| {
-            if (i > start) {
-                try writer.writeAll(str[start..i]);
-            }
-            try writer.writeAll(esc);
-            start = i + 1;
+    while (indexOfSpecial(str, start)) |i| {
+        try writeAll(writer, str[start..i]);
+        switch (str[i]) {
+            '<' => try writeAll(writer, "&lt;"),
+            '>' => try writeAll(writer, "&gt;"),
+            '&' => try writeAll(writer, "&amp;"),
+            '"' => try writeAll(writer, "&quot;"),
+            '\'' => try writeAll(writer, "&#x27;"),
+            else => unreachable,
         }
+        start = i + 1;
     }
-    if (start < str.len) {
-        try writer.writeAll(str[start..]);
+    try writeAll(writer, str[start..]);
+}
+
+const is_special = blk: {
+    var table: [256]bool = @splat(false);
+    for ("<>&\"'") |c| table[c] = true;
+    break :blk table;
+};
+
+/// Returns the index of the first character from `start` that needs escaping.
+/// Most text has none, so it checks a whole vector of bytes at a time.
+fn indexOfSpecial(str: []const u8, start: usize) ?usize {
+    const len = std.math.clamp(std.simd.suggestVectorLength(u8) orelse 16, 16, 64);
+    const Chunk = @Vector(len, u8);
+    const Mask = switch (len) {
+        16 => u16,
+        32 => u32,
+        64 => u64,
+        else => unreachable,
+    };
+
+    var i = start;
+    while (i + len <= str.len) : (i += len) {
+        const chunk: Chunk = str[i..][0..len].*;
+        const special = (chunk == @as(Chunk, @splat('<'))) |
+            (chunk == @as(Chunk, @splat('>'))) |
+            (chunk == @as(Chunk, @splat('&'))) |
+            (chunk == @as(Chunk, @splat('"'))) |
+            (chunk == @as(Chunk, @splat('\'')));
+        const mask: Mask = @bitCast(special);
+        if (mask != 0) return i + @ctz(mask);
     }
+    while (i < str.len) : (i += 1) {
+        if (is_special[str[i]]) return i;
+    }
+    return null;
 }
 
 fn writeFormatted(writer: *std.Io.Writer, value: anytype) std.Io.Writer.Error!void {
@@ -526,6 +554,40 @@ test "escape html entities" {
         "&lt;script&gt;alert(&#x27;xss&#x27;)&lt;/script&gt;",
         output.writer.buffer[0..output.writer.end],
     );
+}
+
+test "escape finds special characters at any position" {
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+    var expected: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer expected.deinit();
+
+    // Covers both the vector loop and the tail, at every offset, and runs
+    // of special characters that span a chunk boundary.
+    var buf: [150]u8 = undefined;
+    for (0..buf.len + 1) |len| {
+        for (0..len) |pos| {
+            for ("<>&\"'") |special| {
+                const str = buf[0..len];
+                for (str, 0..) |*c, i| c.* = if (i == pos) special else 'a' + @as(u8, @intCast(i % 26));
+                if (pos + 1 < len) str[pos + 1] = '&';
+
+                output.clearRetainingCapacity();
+                try writeEscaped(&output.writer, @as([]const u8, str));
+
+                expected.clearRetainingCapacity();
+                for (str) |c| try expected.writer.writeAll(switch (c) {
+                    '<' => "&lt;",
+                    '>' => "&gt;",
+                    '&' => "&amp;",
+                    '"' => "&quot;",
+                    '\'' => "&#x27;",
+                    else => &.{c},
+                });
+                try std.testing.expectEqualStrings(expected.written(), output.written());
+            }
+        }
+    }
 }
 
 test "escape preserves normal text" {
