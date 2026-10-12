@@ -922,17 +922,41 @@ test "writeUrlPart rejects format output too long to check" {
     try expectUrlPart(invalid_url, "", Formatted{ .text = long ++ "a/" }, "");
 }
 
-test "writeAll writes through the buffer and grows it when full" {
-    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
-    defer output.deinit();
+test "writeAll copies into the buffer while it fits and drains otherwise" {
+    const Counting = struct {
+        writer: std.Io.Writer,
+        drains: usize = 0,
+        out: [64]u8 = undefined,
+        out_len: usize = 0,
 
-    // The buffer starts empty, so the first write goes through drain and
-    // the next ones fit into what it allocated.
-    try writeAll(&output.writer, "<td>");
-    try writeAll(&output.writer, "1");
-    try writeAll(&output.writer, "</td>");
-    try writeAll(&output.writer, "");
-    const long: [1000]u8 = @splat('x');
-    try writeAll(&output.writer, &long);
-    try std.testing.expectEqualStrings("<td>1</td>" ++ &long, output.written());
+        fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+            const self: *@This() = @fieldParentPtr("writer", w);
+            std.debug.assert(data.len == 1 and splat == 1);
+            self.drains += 1;
+            for ([_][]const u8{ w.buffered(), data[0] }) |bytes| {
+                @memcpy(self.out[self.out_len..][0..bytes.len], bytes);
+                self.out_len += bytes.len;
+            }
+            w.end = 0;
+            return data[0].len;
+        }
+    };
+
+    var buf: [8]u8 = undefined;
+    var counting: Counting = .{ .writer = .{ .vtable = &.{ .drain = Counting.drain }, .buffer = &buf } };
+    const w = &counting.writer;
+
+    try writeAll(w, "<td>");
+    try writeAll(w, "");
+    try std.testing.expectEqual(4, w.end);
+    // Exactly filling the buffer does not drain.
+    try writeAll(w, "1234");
+    try std.testing.expectEqual(8, w.end);
+    try std.testing.expectEqual(0, counting.drains);
+
+    // One more byte does not fit, so it goes through drain.
+    try writeAll(w, "x");
+    try std.testing.expectEqual(1, counting.drains);
+    try std.testing.expectEqual(0, w.end);
+    try std.testing.expectEqualStrings("<td>1234x", counting.out[0..counting.out_len]);
 }
