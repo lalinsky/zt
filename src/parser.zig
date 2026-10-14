@@ -674,6 +674,7 @@ pub const Parser = struct {
     // =========================================================================
 
     fn parseIfExpr(self: *Parser) Error!ast.IfExpr {
+        const loc = self.location();
         _ = self.match("if");
         self.skipWhitespace();
         const condition = try self.parseParenExpr();
@@ -690,6 +691,7 @@ pub const Parser = struct {
         self.skipWhitespace();
 
         var else_capture: ?[]const u8 = null;
+        const else_loc = self.location();
         const else_branch: ?ast.Branch = if (self.match("else")) blk: {
             self.skipWhitespace();
             // Optional else capture: else |err|
@@ -700,7 +702,7 @@ pub const Parser = struct {
             break :blk try self.parseBranch();
         } else null;
 
-        return .{ .condition = condition, .capture = capture, .then_branch = then_branch, .else_capture = else_capture, .else_branch = else_branch };
+        return .{ .condition = condition, .capture = capture, .then_branch = then_branch, .else_capture = else_capture, .else_branch = else_branch, .loc = loc, .else_loc = else_loc };
     }
 
     fn parseBranch(self: *Parser) Error!ast.Branch {
@@ -731,7 +733,8 @@ pub const Parser = struct {
         }
 
         // Zig code branch (until else or })
-        return .{ .zig_code = try self.parseZigCodeUntilBranchEnd(false) };
+        const loc = self.location();
+        return .{ .zig_code = .{ .code = try self.parseZigCodeUntilBranchEnd(false), .loc = loc } };
     }
 
     fn parseSwitchBranchBody(self: *Parser) Error!ast.Branch {
@@ -755,7 +758,8 @@ pub const Parser = struct {
         }
 
         // Zig code branch (until comma or } for switch)
-        return .{ .zig_code = try self.parseZigCodeUntilBranchEnd(true) };
+        const loc = self.location();
+        return .{ .zig_code = .{ .code = try self.parseZigCodeUntilBranchEnd(true), .loc = loc } };
     }
 
     // =========================================================================
@@ -1238,11 +1242,11 @@ test "parse inline if with zig code branches" {
 
     // Then branch is zig code (the captured variable)
     try std.testing.expect(if_expr.then_branch == .zig_code);
-    try std.testing.expectEqualStrings("v", if_expr.then_branch.zig_code);
+    try std.testing.expectEqualStrings("v", if_expr.then_branch.zig_code.code);
 
     // Else branch is zig code
     try std.testing.expect(if_expr.else_branch.? == .zig_code);
-    try std.testing.expectEqualStrings("\"default\"", if_expr.else_branch.?.zig_code);
+    try std.testing.expectEqualStrings("\"default\"", if_expr.else_branch.?.zig_code.code);
 }
 
 test "parse inline if without else" {

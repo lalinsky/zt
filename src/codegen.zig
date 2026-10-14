@@ -431,14 +431,14 @@ pub const Generator = struct {
     fn generateExpr(self: *Generator, expr: ast.Expr) std.Io.Writer.Error!void {
         switch (expr.content) {
             .zig_code => |code| try self.generateZigCode(code, expr.raw, expr.loc),
-            .if_expr => |if_expr| try self.generateIfExpr(if_expr, expr.raw, expr.loc),
+            .if_expr => |if_expr| try self.generateIfExpr(if_expr, expr.raw),
             .for_expr => |for_expr| try self.generateForExpr(for_expr, expr.raw, expr.loc),
             .switch_expr => |switch_expr| try self.generateSwitchExpr(switch_expr, expr.raw, expr.loc),
             .element => |elem| try self.generateElement(elem.*),
         }
     }
 
-    fn generateIfExpr(self: *Generator, if_expr: ast.IfExpr, raw: bool, loc: ast.Location) std.Io.Writer.Error!void {
+    fn generateIfExpr(self: *Generator, if_expr: ast.IfExpr, raw: bool) std.Io.Writer.Error!void {
         try self.writeIndent();
         try self.output.writeAll("if (");
         try self.output.writeAll(if_expr.condition);
@@ -449,10 +449,10 @@ pub const Generator = struct {
             try self.output.writeAll("|");
         }
         try self.output.writeAll(" {");
-        try self.endLine(loc);
+        try self.endLine(if_expr.loc);
 
         self.indent += 1;
-        try self.generateBranch(if_expr.then_branch, raw, loc);
+        try self.generateBranch(if_expr.then_branch, raw);
         self.indent -= 1;
 
         if (if_expr.else_branch) |else_branch| {
@@ -464,9 +464,9 @@ pub const Generator = struct {
                 try self.output.writeAll("|");
             }
             try self.output.writeAll(" {");
-            try self.endLine(if (if_expr.else_capture != null) loc else .{});
+            try self.endLine(if (if_expr.else_capture != null) if_expr.else_loc else .{});
             self.indent += 1;
-            try self.generateBranch(else_branch, raw, loc);
+            try self.generateBranch(else_branch, raw);
             self.indent -= 1;
         }
 
@@ -484,24 +484,24 @@ pub const Generator = struct {
         try self.endLine(loc);
 
         self.indent += 1;
-        try self.generateBranch(for_expr.body, raw, loc);
+        try self.generateBranch(for_expr.body, raw);
         self.indent -= 1;
 
         try self.writeIndent();
         try self.output.writeAll("}\n");
     }
 
-    fn generateBranch(self: *Generator, branch: ast.Branch, raw: bool, loc: ast.Location) std.Io.Writer.Error!void {
+    fn generateBranch(self: *Generator, branch: ast.Branch, raw: bool) std.Io.Writer.Error!void {
         switch (branch) {
             .element => |elem| try self.generateElement(elem.*),
             .component_call => |call| try self.generateComponentCall(call),
-            .if_expr => |if_expr| try self.generateIfExpr(if_expr.*, raw, loc),
+            .if_expr => |if_expr| try self.generateIfExpr(if_expr.*, raw),
             .nodes => |nodes| {
                 for (nodes) |node| {
                     try self.generateNode(node);
                 }
             },
-            .zig_code => |code| try self.generateZigCode(code, raw, loc),
+            .zig_code => |code| try self.generateZigCode(code.code, raw, code.loc),
         }
     }
 
@@ -674,7 +674,7 @@ pub const Generator = struct {
                         try self.generateNode(node);
                     }
                 },
-                .branch => |branch| try self.generateBranch(branch, false, case.loc),
+                .branch => |branch| try self.generateBranch(branch, false),
             }
             self.indent -= 1;
 
@@ -708,7 +708,7 @@ pub const Generator = struct {
             try self.endLine(case.loc);
 
             self.indent += 1;
-            try self.generateBranch(case.body, raw, case.loc);
+            try self.generateBranch(case.body, raw);
             self.indent -= 1;
 
             try self.writeIndent();
@@ -1318,6 +1318,38 @@ test "generate source location comments on user code lines" {
     // Static markup we generate ourselves is not annotated
     try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAll(_writer, \"<ul class=\\\"list\\\">\");\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeAll(_writer, \"</li>\");\n") != null);
+}
+
+test "generate source locations for inline if branches" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const parser = @import("parser.zig");
+
+    const source =
+        \\templ test(a: anyerror!u32, b: ?u32) {
+        \\    <p>{if (a) |x| x
+        \\        else |err| errText(err)}</p>
+        \\    <p>{if (b == null) "none" else if (b) |y| y else "?"}</p>
+        \\}
+    ;
+
+    var p = parser.Parser.init(arena.allocator(), source);
+    const template = try p.parseTemplate();
+
+    var output: std.Io.Writer.Allocating = .init(arena.allocator());
+    var gen = Generator.init(&output.writer);
+    gen.source_file = "test.zt";
+    try gen.generate(template);
+
+    const result = output.writer.buffer[0..output.writer.end];
+    try std.testing.expect(std.mem.indexOf(u8, result, "if (a) |x| { // test.zt:2:9\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeEscaped(_writer, x); // test.zt:2:20\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "} else |err| { // test.zt:3:9\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeEscaped(_writer, errText(err)); // test.zt:3:20\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "if (b == null) { // test.zt:4:9\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "if (b) |y| { // test.zt:4:36\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "try zt.writeEscaped(_writer, y); // test.zt:4:47\n") != null);
 }
 
 test "generate URL checks only where a dynamic part can set the scheme" {

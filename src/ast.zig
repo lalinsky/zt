@@ -91,6 +91,8 @@ pub const IfExpr = struct {
     then_branch: Branch,
     else_capture: ?[]const u8 = null,
     else_branch: ?Branch,
+    loc: Location = .{},
+    else_loc: Location = .{},
 };
 
 /// Inline for: {for (items) |item| <li>{item}</li>}
@@ -106,7 +108,13 @@ pub const Branch = union(enum) {
     component_call: ComponentCall,
     if_expr: *IfExpr,
     nodes: []const Node,
-    zig_code: []const u8,
+    zig_code: ZigCode,
+};
+
+/// Zig expression used as a branch body, with its own location
+pub const ZigCode = struct {
+    code: []const u8,
+    loc: Location = .{},
 };
 
 /// Component call: @Name(args) or @Name(args) { children }
