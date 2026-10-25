@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-25
+
+### Changed
+
+- Rendering is faster. Integers are written straight into the writer's buffer ([#37], [#41]),
+  adjacent static output is merged into one write with a fast path for short writes ([#38], [#40]),
+  escaping scans a vector at a time ([#42]) and short strings are escaped inline ([#44]),
+  and the generated writing helpers mark the writer `noalias` ([#45]).
+
+### Fixed
+
+- A compile error inside an inline `{if ...}` branch or `else` capture now points at that
+  branch instead of the expression's opening `{` ([#52]).
+
 ## [0.2.0] - 2026-10-11
 
 ### Breaking changes
@@ -38,9 +52,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial release.
 
-[Unreleased]: https://github.com/lalinsky/zt/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/lalinsky/zt/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/lalinsky/zt/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/lalinsky/zt/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/lalinsky/zt/releases/tag/v0.1.0
 [#32]: https://github.com/lalinsky/zt/pull/32
 [#33]: https://github.com/lalinsky/zt/pull/33
 [#34]: https://github.com/lalinsky/zt/pull/34
+[#37]: https://github.com/lalinsky/zt/pull/37
+[#38]: https://github.com/lalinsky/zt/pull/38
+[#40]: https://github.com/lalinsky/zt/pull/40
+[#41]: https://github.com/lalinsky/zt/pull/41
+[#42]: https://github.com/lalinsky/zt/pull/42
+[#44]: https://github.com/lalinsky/zt/pull/44
+[#45]: https://github.com/lalinsky/zt/pull/45
+[#52]: https://github.com/lalinsky/zt/pull/52
