@@ -74,3 +74,52 @@ def test_nested_children(zt):
         }
     ''', args='.{"hello"}')
     assert result == '<div data-tag="a"><span data-tag="b">hello</span></div>'
+
+
+def test_nested_children_without_parameters(zt):
+    result = zt.run('''
+        templ outer() {
+            <div>
+                @children
+            </div>
+        }
+        templ inner() {
+            <span>
+                @children
+            </span>
+        }
+        pub templ run() {
+            @outer() {
+                @inner() {
+                    <b>x</b>
+                }
+            }
+        }
+    ''')
+    assert result == '<div><span><b>x</b></span></div>'
+
+
+def test_multiple_nested_children_without_parameters(zt):
+    result = zt.run('''
+        templ outer() {
+            <div>
+                @children
+            </div>
+        }
+        templ inner() {
+            <span>
+                @children
+            </span>
+        }
+        pub templ run() {
+            @outer() {
+                @inner() {
+                    <b>a</b>
+                }
+                @inner() {
+                    <b>b</b>
+                }
+            }
+        }
+    ''')
+    assert result == '<div><span><b>a</b></span><span><b>b</b></span></div>'

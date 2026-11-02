@@ -301,8 +301,7 @@ pub const Generator = struct {
         try self.writeParams(params);
         // Hidden params for nested children calls
         for (0..num_children_calls) |i| {
-            if (params.len > 0)
-                try self.output.writeAll(", ");
+            if (params.len > 0 or i > 0) try self.output.writeAll(", ");
             try self.writeChildrenParamName(i);
             try self.output.writeAll(": zt.Component");
         }
