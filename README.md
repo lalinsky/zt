@@ -414,6 +414,12 @@ pub templ Page() {
 }
 ```
 
+A call can also follow other content on the same line:
+
+```zig
+<td>@Price(item.price)</td>
+```
+
 With imports:
 
 ```zig

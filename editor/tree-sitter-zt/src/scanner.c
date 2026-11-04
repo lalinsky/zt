@@ -1,6 +1,8 @@
 #include "tree_sitter/parser.h"
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 // Order must match externals[] in grammar.js
 typedef enum {
@@ -9,6 +11,9 @@ typedef enum {
     ZIG_EXPR_FREE,    // attributes, conditions: unconstrained
     ZIG_BRANCH_EXPR,  // _branch positions: like ZIG_EXPR + rejects <, @, { as first char
     RAW_TEXT,         // raw content of <style> and <script> elements
+    TEXT,             // text between tags, stops before inline component calls
+    ELSE_KEYWORD,     // "else", only to know when it is valid
+    OPEN_PAREN,       // "(", only to know when component arguments can follow
 } TokenType;
 
 void *tree_sitter_zt_external_scanner_create(void) { return NULL; }
@@ -87,6 +92,238 @@ static bool at_control_flow_keyword(TSLexer *l) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Zig builtins: an @name in this list is Zig code, not a component call.
+// Union of std.zig.BuiltinFn.list in Zig 0.16 and 0.17, sorted for bsearch.
+// ─────────────────────────────────────────────────────────────────────────────
+static const char *const builtins[] = {
+    "Enum",
+    "EnumLiteral",
+    "FieldType",
+    "Fn",
+    "Frame",
+    "Int",
+    "Pointer",
+    "SpirvType",
+    "Struct",
+    "This",
+    "Tuple",
+    "TypeOf",
+    "Union",
+    "Vector",
+    "abs",
+    "addWithOverflow",
+    "addrSpaceCast",
+    "alignCast",
+    "alignOf",
+    "as",
+    "atomicLoad",
+    "atomicRmw",
+    "atomicStore",
+    "backingInt",
+    "bitCast",
+    "bitOffsetOf",
+    "bitReverse",
+    "bitSizeOf",
+    "branchHint",
+    "breakpoint",
+    "byteSwap",
+    "cDefine",
+    "cImport",
+    "cInclude",
+    "cUndef",
+    "cVaArg",
+    "cVaCopy",
+    "cVaEnd",
+    "cVaStart",
+    "call",
+    "ceil",
+    "clz",
+    "cmpxchgStrong",
+    "cmpxchgWeak",
+    "compileError",
+    "compileLog",
+    "constCast",
+    "cos",
+    "ctz",
+    "disableInstrumentation",
+    "disableIntrinsics",
+    "divCeil",
+    "divExact",
+    "divFloor",
+    "divTrunc",
+    "embedFile",
+    "enumFromInt",
+    "errorCast",
+    "errorFromInt",
+    "errorName",
+    "errorReturnTrace",
+    "exp",
+    "exp2",
+    "export",
+    "extern",
+    "field",
+    "fieldParentPtr",
+    "floatCast",
+    "floatFromInt",
+    "floor",
+    "frame",
+    "frameAddress",
+    "fromBackingInt",
+    "hasDecl",
+    "hasField",
+    "import",
+    "inComptime",
+    "intCast",
+    "intFromBool",
+    "intFromEnum",
+    "intFromError",
+    "intFromFloat",
+    "intFromPtr",
+    "log",
+    "log10",
+    "log2",
+    "max",
+    "memcpy",
+    "memmove",
+    "memset",
+    "min",
+    "mod",
+    "mulAdd",
+    "mulWithOverflow",
+    "offsetOf",
+    "panic",
+    "popCount",
+    "prefetch",
+    "ptrCast",
+    "ptrFromInt",
+    "reduce",
+    "rem",
+    "returnAddress",
+    "round",
+    "select",
+    "setEvalBranchQuota",
+    "setFloatMode",
+    "setRuntimeSafety",
+    "shlExact",
+    "shlWithOverflow",
+    "shrExact",
+    "shuffle",
+    "sin",
+    "sizeOf",
+    "splat",
+    "sqrt",
+    "src",
+    "subWithOverflow",
+    "tagName",
+    "tan",
+    "trap",
+    "trunc",
+    "truncate",
+    "typeInfo",
+    "typeName",
+    "unionInit",
+    "volatileCast",
+    "wasmMemoryGrow",
+    "wasmMemorySize",
+    "workGroupId",
+    "workGroupSize",
+    "workItemId",
+};
+
+static int compare_name(const void *key, const void *elem) {
+    return strcmp((const char *)key, *(const char *const *)elem);
+}
+
+static bool is_builtin(const char *name) {
+    return bsearch(name, builtins, sizeof(builtins) / sizeof(builtins[0]), sizeof(builtins[0]), compare_name) != NULL;
+}
+
+// Consume an @name (the lexer is at '@') and copy the name without the '@'
+// into buf. Dots are included, like in @ui.Button. Names that don't fit
+// are truncated, which is fine since no builtin is that long.
+static void scan_at_name(TSLexer *l, char *buf, size_t size) {
+    size_t len = 0;
+    consume(l); // '@'
+    while (is_ident(l->lookahead) || l->lookahead == '.') {
+        if (len + 1 < size) buf[len++] = (char)l->lookahead;
+        consume(l);
+    }
+    buf[len] = 0;
+}
+
+typedef enum {
+    AT_TEXT,       // not a call: an email address, a builtin like @tagName(x), ...
+    AT_CALL,       // @Name(args) or @children, a call anywhere in content
+    AT_PLAIN_NAME, // @name without arguments, a call only at the start of a node
+} AtKind;
+
+// Classify the @name at the lexer position, like checkInlineComponentCall in
+// src/parser.zig. Consumes the name and any spaces after it.
+static AtKind scan_at(TSLexer *l) {
+    char name[64];
+    scan_at_name(l, name, sizeof(name));
+    if (!((name[0] >= 'a' && name[0] <= 'z') || (name[0] >= 'A' && name[0] <= 'Z') || name[0] == '_')) return AT_TEXT;
+    if (is_builtin(name)) return AT_TEXT;
+    if (strcmp(name, "children") == 0) return AT_CALL;
+    while (is_space(l->lookahead)) consume(l);
+    if (l->lookahead == '(') return AT_CALL;
+    return AT_PLAIN_NAME;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEXT: text between tags, up to '<', '{' or '}'
+//
+// Like parseText in src/parser.zig, text stops before a component call
+// (@Name(args) or @children), but not before an email address or a builtin.
+// At the start of text, it yields to control-flow keywords and to a component
+// call. An @name without arguments is a call when it follows whitespace, as
+// at the start of a line or a block, and text when it is glued to the
+// preceding tag (<div>@test</div>) or text.
+// ─────────────────────────────────────────────────────────────────────────────
+static bool is_text_end(int32_t c) { return c == '<' || c == '{' || c == '}'; }
+
+static bool scan_text(TSLexer *l, bool else_valid, bool paren_valid) {
+    bool skipped_ws = false;
+    bool skipped_newline = false;
+    while (is_space(l->lookahead) || is_newline(l->lookahead)) {
+        if (is_newline(l->lookahead)) skipped_newline = true;
+        skip_ws(l);
+        skipped_ws = true;
+    }
+
+    // Right after a component name, arguments on the same line belong to the call
+    if (paren_valid && !skipped_newline && l->lookahead == '(') return false;
+
+    if (l->eof(l) || is_text_end(l->lookahead)) return false;
+
+    if (l->lookahead == '@') {
+        AtKind kind = scan_at(l);
+        if (kind == AT_CALL) return false;
+        if (kind == AT_PLAIN_NAME && skipped_ws) return false;
+    } else {
+        if (at_control_flow_keyword(l)) return false;
+        if (else_valid && match_str(l, "else") && !is_ident(l->lookahead)) return false;
+    }
+
+    for (;;) {
+        if (l->eof(l) || is_text_end(l->lookahead)) break;
+        if (l->lookahead == '@') {
+            l->mark_end(l); // tentative end before '@'
+            if (scan_at(l) == AT_CALL) {
+                l->result_symbol = TEXT;
+                return true;
+            }
+            continue;
+        }
+        consume(l);
+    }
+
+    l->mark_end(l);
+    l->result_symbol = TEXT;
+    return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ZIG_CODE: consume lines of Zig code until a template declaration
 // ─────────────────────────────────────────────────────────────────────────────
 static bool scan_zig_code(TSLexer *l) {
@@ -146,8 +383,14 @@ static bool scan_zig_expr(TSLexer *l, bool block_keywords, bool branch_mode, boo
 
     int32_t first = l->lookahead;
 
-    // In _branch context, yield to element (<), component_call (@), branch_block ({)
-    if (branch_mode && (first == '<' || first == '@' || first == '{')) return false;
+    // In _branch context, yield to element (<), component_call (@), branch_block ({),
+    // but a builtin like @errorName(err) is Zig code
+    if (branch_mode && (first == '<' || first == '{')) return false;
+    if (branch_mode && first == '@') {
+        char name[64];
+        scan_at_name(l, name, sizeof(name));
+        if (!is_builtin(name)) return false;
+    }
 
     // In _expr_content, yield to raw_marker ("!") so {!expr} is parsed correctly
     if (yield_excl && first == '!') return false;
@@ -160,7 +403,7 @@ static bool scan_zig_expr(TSLexer *l, bool block_keywords, bool branch_mode, boo
     int paren = 0, brace = 0, bracket = 0;
     // If at_control_flow_keyword consumed chars speculatively and returned false,
     // we've already advanced past the first char — mark it as real content.
-    bool has = block_keywords && (first == 'i' || first == 'f' || first == 's');
+    bool has = (block_keywords && (first == 'i' || first == 'f' || first == 's')) || first == '@';
 
     for (;;) {
         int32_t c = l->lookahead;
@@ -253,6 +496,7 @@ bool tree_sitter_zt_external_scanner_scan(
 ) {
     (void)payload;
     if (valid_symbols[RAW_TEXT])        return scan_raw_text(lexer);
+    if (valid_symbols[TEXT])            return scan_text(lexer, valid_symbols[ELSE_KEYWORD], valid_symbols[OPEN_PAREN]);
     if (valid_symbols[ZIG_CODE])        return scan_zig_code(lexer);
     if (valid_symbols[ZIG_EXPR])        return scan_zig_expr(lexer, true,  false, true,  ZIG_EXPR);
     if (valid_symbols[ZIG_EXPR_FREE])   return scan_zig_expr(lexer, false, false, false, ZIG_EXPR_FREE);

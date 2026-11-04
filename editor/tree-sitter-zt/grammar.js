@@ -10,6 +10,9 @@ module.exports = grammar({
     $.zig_expr_free,    // balanced expression; unconstrained (attributes, conditions)
     $.zig_branch_expr,  // balanced expression; blocks keywords AND <, @, { (for _branch)
     $.raw_text,         // raw content of <style> and <script> elements
+    $.text,             // text between tags, stops before inline component calls
+    "else",             // listed only so the text scanner knows when it is valid
+    "(",                // listed only so the text scanner knows when it is valid
   ],
 
   extras: ($) => [/[ \t\r\n]/],
@@ -289,14 +292,6 @@ module.exports = grammar({
     capture: ($) => seq("|", $.capture_content, "|"),
 
     capture_content: (_) => /[^|]+/,
-
-    // -------------------------------------------------------------------------
-    // Text content between tags
-    // -------------------------------------------------------------------------
-
-    // Must start with a non-special character and not be a keyword followed by (
-    // prec(-1) means any more specific rule wins.
-    text: (_) => token(prec(-1, /[^<>{}\s@][^<>{}]*/)),
 
     name: (_) => /[A-Za-z_][A-Za-z0-9_]*/,
   },

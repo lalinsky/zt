@@ -354,6 +354,12 @@ pub const Parser = struct {
         }
         if (c == '{') return .{ .expr = try self.parseExprBlock() };
 
+        // Component calls are recognized anywhere in content, `@Name(` and
+        // `@children` can't be mistaken for text
+        if (c == '@' and self.checkInlineComponentCall()) {
+            return .{ .component_call = try self.parseComponentCall() };
+        }
+
         // Block-level constructs only allowed at block start or after newline
         if (allow_block_constructs) {
             if (c == '@') return .{ .component_call = try self.parseComponentCall() };
@@ -720,8 +726,8 @@ pub const Parser = struct {
             return .{ .element = elem };
         }
 
-        // Component call branch: @Name(args)
-        if (c == '@') {
+        // Component call branch: @Name(args), but not a Zig builtin like @tagName(x)
+        if (c == '@' and !self.checkBuiltinCall()) {
             return .{ .component_call = try self.parseComponentCall() };
         }
 
@@ -752,8 +758,8 @@ pub const Parser = struct {
             return .{ .element = elem };
         }
 
-        // Component call branch: @Name(args)
-        if (c == '@') {
+        // Component call branch: @Name(args), but not a Zig builtin like @tagName(x)
+        if (c == '@' and !self.checkBuiltinCall()) {
             return .{ .component_call = try self.parseComponentCall() };
         }
 
@@ -782,12 +788,18 @@ pub const Parser = struct {
 
         // Optional children block: @Name(args) { ... }
         // Only skip spaces (not newlines) for lookahead - preserve newlines for block detection
+        const saved_pos = self.pos;
+        const saved_col = self.col;
         self.skipSpaces();
         var children: []const ast.Node = &.{};
         if (self.match("{")) {
             children = try self.parseNodes(true); // at_block_start = true
             self.skipWhitespace();
             if (!self.match("}")) return self.fail("expected '}}' to close component children block", .{});
+        } else {
+            // Keep the spaces, they can separate the call from text that follows
+            self.pos = saved_pos;
+            self.col = saved_col;
         }
 
         return .{
@@ -796,6 +808,35 @@ pub const Parser = struct {
             .children = children,
             .loc = loc,
         };
+    }
+
+    /// Return the `@name` at the current position, including the `@` and any dots
+    fn peekAtName(self: *Parser) []const u8 {
+        if (self.peek() != @as(u8, '@')) return "";
+        var end = self.pos + 1;
+        while (end < self.source.len) : (end += 1) {
+            const c = self.source[end];
+            if (!std.ascii.isAlphanumeric(c) and c != '_' and c != '.') break;
+        }
+        return self.source[self.pos..end];
+    }
+
+    /// Check for a Zig builtin call like @tagName(x)
+    fn checkBuiltinCall(self: *Parser) bool {
+        return std.zig.BuiltinFn.list.has(self.peekAtName());
+    }
+
+    /// Check for a component call that can follow other content on a line:
+    /// @Name(args) or @children. Anything else, like an email address or a
+    /// Zig builtin, stays text.
+    fn checkInlineComponentCall(self: *Parser) bool {
+        const name = self.peekAtName();
+        if (name.len < 2 or !(std.ascii.isAlphabetic(name[1]) or name[1] == '_')) return false;
+        if (self.checkBuiltinCall()) return false;
+        if (std.mem.eql(u8, name, "@children")) return true;
+        var i = self.pos + name.len;
+        while (i < self.source.len and (self.source[i] == ' ' or self.source[i] == '\t')) : (i += 1) {}
+        return i < self.source.len and self.source[i] == '(';
     }
 
     /// Parse identifier with optional dots: foo, foo.bar, foo.bar.baz
@@ -1123,6 +1164,7 @@ pub const Parser = struct {
         const start = self.pos;
         while (self.peek()) |c| {
             if (c == '<' or c == '{' or c == '}') break;
+            if (c == '@' and self.checkInlineComponentCall()) break;
             _ = self.advance();
         }
         return .{ .content = self.source[start..self.pos] };

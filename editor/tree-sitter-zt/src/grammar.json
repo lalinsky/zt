@@ -1288,17 +1288,6 @@
       "type": "PATTERN",
       "value": "[^|]+"
     },
-    "text": {
-      "type": "TOKEN",
-      "content": {
-        "type": "PREC",
-        "value": -1,
-        "content": {
-          "type": "PATTERN",
-          "value": "[^<>{}\\s@][^<>{}]*"
-        }
-      }
-    },
     "name": {
       "type": "PATTERN",
       "value": "[A-Za-z_][A-Za-z0-9_]*"
@@ -1340,6 +1329,18 @@
     {
       "type": "SYMBOL",
       "name": "raw_text"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "text"
+    },
+    {
+      "type": "STRING",
+      "value": "else"
+    },
+    {
+      "type": "STRING",
+      "value": "("
     }
   ],
   "inline": [],
